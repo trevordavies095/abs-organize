@@ -7,21 +7,24 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from abs_organize.covers import resolve_cover, write_cover_jpg
 from abs_organize.discovery import (
     BookAudio,
     collect_book_audio,
     discover_book_root,
-    list_sidecars,
+    list_copy_sidecars,
+    sidecar_root,
 )
 from abs_organize.metadata import (
     BookMetadata,
-    MetadataError,
     MetadataOverrides,
     SUPPORTED_EXTENSIONS,
     ValidationError,
+    apply_gap_fill,
     resolve_book_metadata,
 )
 from abs_organize.naming import book_destination_segments
+from abs_organize.opf import parse_opf, read_reader_txt
 
 
 class OrganizeIOError(Exception):
@@ -103,6 +106,91 @@ def _assert_replace_safe(dest_dir: Path, library_path: Path) -> None:
         )
 
 
+def _copy_sidecars(sidecars: list[Path], dest_dir: Path) -> tuple[str, ...]:
+    copied: list[str] = []
+    for sidecar in sidecars:
+        dest_file = dest_dir / sidecar.name
+        try:
+            shutil.copy2(sidecar, dest_file)
+        except OSError as exc:
+            raise OrganizeIOError(
+                f"Failed to copy sidecar {sidecar.name}: {exc}"
+            ) from exc
+        copied.append(sidecar.name)
+    return tuple(copied)
+
+
+def _resolve_gap_fill_sources(
+    sidecars: list[Path],
+    *,
+    on_log: Callable[[str], None] | None = None,
+) -> tuple[BookMetadata | None, str | None]:
+    opf_paths = [path for path in sidecars if path.suffix.lower() == ".opf"]
+    opf_metadata = None
+    if opf_paths:
+        if len(opf_paths) > 1 and on_log is not None:
+            on_log(
+                "Multiple OPF files found; using "
+                f"{opf_paths[0].name} for metadata gap-fill."
+            )
+        opf_metadata = parse_opf(opf_paths[0])
+
+    reader_txt = None
+    for sidecar in sidecars:
+        if sidecar.name.lower() == "reader.txt":
+            reader_txt = read_reader_txt(sidecar)
+            break
+
+    return opf_metadata, reader_txt
+
+
+def _apply_supplemental_files(
+    *,
+    sidecar_root_path: Path,
+    track_files: list[Path],
+    sidecars: list[Path],
+    dest_dir: Path,
+    dry_run: bool,
+    on_log: Callable[[str], None] | None = None,
+) -> tuple[str, ...]:
+    copied: list[str] = []
+
+    cover = resolve_cover(sidecar_root_path, track_files)
+    if cover is not None:
+        if dry_run:
+            copied.append("Cover.jpg")
+            if on_log is not None:
+                if cover.has_sidecar:
+                    on_log(
+                        f"Would copy cover from {cover.sidecar_path.name} as Cover.jpg"
+                    )
+                else:
+                    on_log("Would extract embedded cover as Cover.jpg")
+        else:
+            copied.append(write_cover_jpg(dest_dir, cover))
+            if on_log is not None:
+                if cover.has_sidecar:
+                    on_log(
+                        f"Wrote Cover.jpg from sidecar {cover.sidecar_path.name}"
+                    )
+                else:
+                    on_log("Wrote Cover.jpg from embedded audio art")
+
+    if sidecars:
+        if dry_run:
+            copied.extend(sidecar.name for sidecar in sidecars)
+            if on_log is not None:
+                for sidecar in sidecars:
+                    on_log(f"Would copy sidecar: {sidecar.name}")
+        else:
+            copied.extend(_copy_sidecars(sidecars, dest_dir))
+            if on_log is not None:
+                for sidecar in sidecars:
+                    on_log(f"Copied sidecar: {sidecar.name}")
+
+    return tuple(copied)
+
+
 def _planned_filenames(audio: list[BookAudio]) -> tuple[str, ...]:
     return tuple(item.dest_relative.as_posix() for item in audio)
 
@@ -149,19 +237,26 @@ def organize(
     _validate_library(library_path)
 
     if input_path.is_file():
+        book_root = input_path
         book_audio = collect_book_audio(input_path)
     else:
         book_root = discover_book_root(input_path)
         book_audio = collect_book_audio(book_root)
-        if on_log is not None:
-            for sidecar in list_sidecars(book_root):
-                on_log(f"Sidecar found (not copied): {sidecar.name}")
 
+    sidecar_root_path = sidecar_root(input_path, book_root)
+    copy_sidecars = list_copy_sidecars(sidecar_root_path)
     track_files = [item.source for item in book_audio]
-    try:
-        resolved = resolve_book_metadata(track_files, overrides=overrides)
-    except MetadataError:
-        raise
+
+    resolved = resolve_book_metadata(track_files, overrides=overrides)
+    opf_metadata, reader_txt = _resolve_gap_fill_sources(
+        copy_sidecars, on_log=on_log
+    )
+    resolved = apply_gap_fill(
+        resolved,
+        opf_metadata=opf_metadata,
+        reader_txt=reader_txt,
+        overrides=overrides,
+    )
 
     dest_dir = _build_dest_dir(
         resolved.metadata,
@@ -190,15 +285,26 @@ def organize(
             )
 
     if dry_run:
-        copied_files = _planned_filenames(book_audio)
+        copied_files = list(_planned_filenames(book_audio))
     else:
-        copied_files = _copy_files(book_audio, dest_dir)
+        copied_files = list(_copy_files(book_audio, dest_dir))
+
+    copied_files.extend(
+        _apply_supplemental_files(
+            sidecar_root_path=sidecar_root_path,
+            track_files=track_files,
+            sidecars=copy_sidecars,
+            dest_dir=dest_dir,
+            dry_run=dry_run,
+            on_log=on_log,
+        )
+    )
 
     return (
         OrganizeResult(
             source=input_path,
             dest_dir=dest_dir,
-            copied_files=copied_files,
+            copied_files=tuple(copied_files),
         ),
         resolved.warnings + extra_warnings,
     )

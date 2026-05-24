@@ -361,3 +361,48 @@ def resolve_book_metadata(
 ) -> ResolvedMetadata:
     per_file = [read_book_metadata(path) for path in paths]
     return resolve_majority(per_file, overrides=overrides)
+
+
+_GAP_FILL_FIELDS = ("series", "sequence", "year", "narrator", "subtitle")
+
+
+def apply_gap_fill(
+    resolved: ResolvedMetadata,
+    *,
+    opf_metadata: BookMetadata | None = None,
+    reader_txt: str | None = None,
+    overrides: MetadataOverrides | None = None,
+) -> ResolvedMetadata:
+    """Fill empty optional metadata from OPF and reader.txt after audio majority."""
+    overrides = overrides or MetadataOverrides()
+    override_map = {
+        "series": overrides.series,
+        "sequence": overrides.sequence,
+        "year": overrides.year,
+        "narrator": overrides.narrator,
+    }
+
+    current = resolved.metadata
+    updates: dict[str, object] = {}
+
+    if opf_metadata is not None:
+        for field in _GAP_FILL_FIELDS:
+            if override_map.get(field) is not None:
+                continue
+            existing = getattr(current, field)
+            if existing is not None and existing != "":
+                continue
+            incoming = getattr(opf_metadata, field)
+            if incoming is not None and incoming != "":
+                updates[field] = incoming
+
+    if reader_txt and override_map.get("narrator") is None:
+        narrator = updates.get("narrator", current.narrator)
+        if narrator is None or narrator == "":
+            updates["narrator"] = reader_txt
+
+    if not updates:
+        return resolved
+
+    metadata = replace(current, **updates)
+    return ResolvedMetadata(metadata=metadata, warnings=resolved.warnings)

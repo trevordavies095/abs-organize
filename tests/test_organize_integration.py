@@ -661,3 +661,98 @@ def test_replace_refuses_library_root(tmp_path):
 
     with pytest.raises(ValidationError, match="library root"):
         _assert_replace_safe(library, library)
+
+
+def test_organize_sidecar_cover_copied_as_cover_jpg(
+    tmp_path, make_tagged_mp3, minimal_jpeg
+):
+    book = tmp_path / "download"
+    book.mkdir()
+    track = make_tagged_mp3(albumartist="Jane Author", album="Book Title")
+    track.rename(book / track.name)
+    (book / "cover.jpg").write_bytes(minimal_jpeg)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result = organize_file(book, library)
+
+    assert (result.dest_dir / "Cover.jpg").is_file()
+    assert "Cover.jpg" in result.copied_files
+
+
+def test_organize_embedded_cover_extracted(tmp_path, make_mp3_with_cover):
+    source = make_mp3_with_cover(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result = organize_file(source, library)
+
+    assert (result.dest_dir / "Cover.jpg").is_file()
+    assert "Cover.jpg" in result.copied_files
+
+
+def test_organize_copies_text_and_opf_sidecars(tmp_path, make_tagged_mp3, write_opf):
+    book = tmp_path / "download"
+    book.mkdir()
+    track = make_tagged_mp3(albumartist="Jane Author", album="Book Title")
+    track.rename(book / track.name)
+    (book / "desc.txt").write_text("A great book.", encoding="utf-8")
+    (book / "reader.txt").write_text("Sam Tsoutsouvas", encoding="utf-8")
+    write_opf(book / "metadata.opf", series="Ignored Series")
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result = organize_file(book, library)
+
+    assert (result.dest_dir / "desc.txt").read_text(encoding="utf-8") == "A great book."
+    assert (result.dest_dir / "reader.txt").read_text(encoding="utf-8") == "Sam Tsoutsouvas"
+    assert (result.dest_dir / "metadata.opf").is_file()
+    assert "desc.txt" in result.copied_files
+    assert "reader.txt" in result.copied_files
+    assert "metadata.opf" in result.copied_files
+
+
+def test_organize_opf_series_gap_fill_creates_series_folder(
+    tmp_path, make_tagged_mp3, write_opf
+):
+    book = tmp_path / "download"
+    book.mkdir()
+    track = make_tagged_mp3(albumartist="Terry Goodkind", album="Wizards First Rule")
+    track.rename(book / track.name)
+    write_opf(book / "metadata.opf", series="Sword of Truth", sequence="1")
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result = organize_file(book, library)
+
+    dest = (
+        library
+        / "Terry Goodkind"
+        / "Sword of Truth"
+        / "Vol 1 - Wizards First Rule"
+        / track.name
+    )
+    assert dest.is_file()
+    assert result.dest_dir == dest.parent
+
+
+def test_organize_reader_txt_fills_narrator_in_title_folder(tmp_path, make_tagged_mp3):
+    book = tmp_path / "download"
+    book.mkdir()
+    track = make_tagged_mp3(albumartist="Jane Author", album="Book Title")
+    track.rename(book / track.name)
+    (book / "reader.txt").write_text("Sam Tsoutsouvas", encoding="utf-8")
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result = organize_file(book, library)
+
+    assert result.dest_dir.name == "Book Title {Sam Tsoutsouvas}"
+    assert (result.dest_dir / "reader.txt").is_file()

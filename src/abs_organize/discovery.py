@@ -22,15 +22,10 @@ _CONTAINER_EXTENSIONS = frozenset({".m4b", ".m4a"})
 
 _DISC_FOLDER_RE = re.compile(r"^(disc|cd|disk)\s*0*(\d+)$", re.IGNORECASE)
 
-_SIDECAR_NAMES = frozenset(
-    {
-        "cover.jpg",
-        "folder.jpg",
-        "Cover.jpg",
-        "desc.txt",
-        "reader.txt",
-    }
-)
+_COPY_SIDECAR_NAMES = frozenset({"desc.txt", "reader.txt"})
+
+_COVER_BASENAMES = ("cover", "folder")
+_COVER_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png"})
 
 _MULTIPLE_BOOKS_PREFIX = (
     "Multiple books detected in INPUT. Re-run on one book at a time:"
@@ -226,14 +221,59 @@ def collect_track_files(book_root: Path) -> list[Path]:
     return [audio.source for audio in collect_book_audio(book_root)]
 
 
-def list_sidecars(book_root: Path) -> list[Path]:
-    """Return recognized sidecar files at book root (not copied in this slice)."""
+def sidecar_root(input_path: Path, book_root: Path) -> Path:
+    """Return the directory to search for sidecars and cover images."""
+    input_path = input_path.resolve()
     book_root = book_root.resolve()
+    if input_path.is_file():
+        return input_path.parent
+    return book_root
+
+
+def _is_cover_sidecar(path: Path) -> bool:
+    stem = path.stem.lower()
+    suffix = path.suffix.lower()
+    return stem in _COVER_BASENAMES and suffix in _COVER_EXTENSIONS
+
+
+def find_cover_sidecar(sidecar_root: Path) -> Path | None:
+    """Return the highest-priority cover image at *sidecar_root*, if any."""
+    sidecar_root = sidecar_root.resolve()
+    if not sidecar_root.is_dir():
+        return None
+
+    by_key: dict[tuple[str, str], Path] = {}
+    for child in sidecar_root.iterdir():
+        if child.is_file() and _is_cover_sidecar(child):
+            by_key[(child.stem.lower(), child.suffix.lower())] = child
+
+    for basename in _COVER_BASENAMES:
+        for ext in (".jpg", ".jpeg", ".png"):
+            match = by_key.get((basename, ext))
+            if match is not None:
+                return match
+    return None
+
+
+def list_copy_sidecars(sidecar_root: Path) -> list[Path]:
+    """Return text and OPF sidecars to copy into the title folder."""
+    sidecar_root = sidecar_root.resolve()
     sidecars: list[Path] = []
-    for child in book_root.iterdir():
+    for child in sidecar_root.iterdir():
         if not child.is_file():
             continue
-        name = child.name
-        if name in _SIDECAR_NAMES or name.lower().endswith(".opf"):
+        name_lower = child.name.lower()
+        if name_lower in _COPY_SIDECAR_NAMES or name_lower.endswith(".opf"):
             sidecars.append(child)
+    return sorted(sidecars, key=lambda p: p.name.lower())
+
+
+def list_sidecars(sidecar_root: Path) -> list[Path]:
+    """Return all recognized sidecar files at *sidecar_root*."""
+    sidecar_root = sidecar_root.resolve()
+    sidecars: list[Path] = []
+    cover = find_cover_sidecar(sidecar_root)
+    if cover is not None:
+        sidecars.append(cover)
+    sidecars.extend(list_copy_sidecars(sidecar_root))
     return sorted(sidecars, key=lambda p: p.name.lower())

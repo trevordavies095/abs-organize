@@ -8,7 +8,10 @@ from abs_organize.discovery import (
     collect_book_audio,
     collect_track_files,
     discover_book_root,
+    find_cover_sidecar,
     is_disc_folder_name,
+    list_copy_sidecars,
+    sidecar_root,
 )
 from abs_organize.metadata import ValidationError
 
@@ -222,3 +225,34 @@ def test_discover_book_root_wrapper_with_multi_disc(tmp_path, make_tagged_mp3):
         "Disc 1/01.mp3",
         "Disc 2/01.mp3",
     ]
+
+
+def test_find_cover_sidecar_case_insensitive(tmp_path, minimal_jpeg):
+    (tmp_path / "Cover.JPG").write_bytes(minimal_jpeg)
+    assert find_cover_sidecar(tmp_path) == tmp_path / "Cover.JPG"
+
+
+def test_find_cover_sidecar_prefers_cover_over_folder(tmp_path, minimal_jpeg):
+    (tmp_path / "folder.jpg").write_bytes(minimal_jpeg)
+    cover = tmp_path / "cover.jpg"
+    cover.write_bytes(minimal_jpeg)
+    assert find_cover_sidecar(tmp_path) == cover
+
+
+def test_list_copy_sidecars_includes_text_and_opf(tmp_path):
+    (tmp_path / "desc.txt").write_text("description", encoding="utf-8")
+    (tmp_path / "reader.txt").write_text("Narrator Name", encoding="utf-8")
+    (tmp_path / "book.opf").write_text("<package/>", encoding="utf-8")
+
+    sidecars = list_copy_sidecars(tmp_path)
+
+    assert [path.name for path in sidecars] == ["book.opf", "desc.txt", "reader.txt"]
+
+
+def test_sidecar_root_for_file_input(tmp_path, make_tagged_mp3):
+    source = make_tagged_mp3(name="book.mp3")
+    book_dir = tmp_path / "download"
+    book_dir.mkdir()
+    source.rename(book_dir / source.name)
+
+    assert sidecar_root(book_dir / "book.mp3", book_dir / "book.mp3") == book_dir
