@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 from abs_organize.metadata import BookMetadata
 
-_ILLEGAL_CHARS = re.compile(r'[/:\\0<>"|?*]')
+_ILLEGAL_CHARS = re.compile(r'[/:\\<>"|?*\x00]')
 _WHITESPACE = re.compile(r"\s+")
 _MAX_SEGMENT_LENGTH = 180
 

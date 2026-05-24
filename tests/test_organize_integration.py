@@ -49,6 +49,27 @@ def test_organize_m4b_with_artist_and_title(tmp_path, make_tagged_m4b):
     assert dest.is_file()
 
 
+def test_organize_year_with_zero_in_title_folder(tmp_path, make_tagged_m4b):
+    source = make_tagged_m4b(
+        artist="Andy Weir",
+        title="Project Hail Mary",
+        date="2021",
+        narrator="Ray Porter",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    organize_file(source, library)
+
+    dest = (
+        library
+        / "Andy Weir"
+        / "2021 - Project Hail Mary {Ray Porter}"
+        / "book.m4b"
+    )
+    assert dest.is_file()
+
+
 def test_organize_maximal_series_layout(tmp_path, make_tagged_m4b_with_movement):
     source = make_tagged_m4b_with_movement(
         albumartist="Terry Goodkind",

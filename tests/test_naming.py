@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from abs_organize.metadata import BookMetadata
 from abs_organize.naming import (
     _sanitize_segment,
@@ -35,6 +37,23 @@ def test_sanitize_verbose_logs_substitutions():
     messages: list[str] = []
     _sanitize_segment("bad/name", on_log=messages.append)
     assert any("illegal" in message.lower() for message in messages)
+
+
+def test_sanitize_replaces_null_byte():
+    assert _sanitize_segment("a\x00b") == "a-b"
+
+
+@pytest.mark.parametrize("year", [1994, 1990, 2001, 2021])
+def test_build_title_folder_preserves_year_digits(year: int):
+    meta = BookMetadata(
+        author="Andy Weir",
+        title="Project Hail Mary",
+        year=year,
+        narrator="Ray Porter",
+    )
+    assert build_title_folder(meta) == (
+        f"{year} - Project Hail Mary {{Ray Porter}}"
+    )
 
 
 def test_golden_terry_goodkind_series_layout():
