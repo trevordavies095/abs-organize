@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from abs_organize.heuristics import guess_from_name
+from abs_organize.heuristics import guess_from_name, infer_sequence_from_folder_name
 
 
 def test_guess_author_title_hyphen():
@@ -63,3 +63,25 @@ def test_guess_strips_whitespace():
     assert result is not None
     assert result.author == "Jane Author"
     assert result.title == "Great Book"
+
+
+def test_infer_sequence_hyphen_separator():
+    assert infer_sequence_from_folder_name("01 - Hitchhiker") == 1
+
+
+def test_infer_sequence_dot_separator():
+    assert infer_sequence_from_folder_name("12. Title") == 12
+
+
+def test_infer_sequence_space_separator():
+    assert infer_sequence_from_folder_name("3 Title") == 3
+
+
+def test_infer_sequence_no_match():
+    assert infer_sequence_from_folder_name("Hitchhiker") is None
+    assert infer_sequence_from_folder_name("") is None
+
+
+def test_infer_sequence_documented_false_positive_year_prefix():
+    # Leading year in folder names is treated as volume (known limitation).
+    assert infer_sequence_from_folder_name("1984 - Orwell") == 1984

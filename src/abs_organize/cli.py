@@ -20,7 +20,7 @@ from abs_organize.config import (
     load_config,
     resolve_library_path,
 )
-from abs_organize.batch import BatchResult, organize_batch
+from abs_organize.batch import BatchResult, BookOutcome, organize_batch
 from abs_organize.metadata import MetadataError, MetadataOverrides, ValidationError
 from abs_organize.organize import OrganizeIOError, OrganizeResult, organize
 
@@ -117,7 +117,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "organize every detected book root under INPUT (multi-book inbox); "
-            "without this flag, multi-book INPUT fails with a candidate list"
+            "without this flag, multi-book INPUT fails with a candidate list. "
+            "With multiple books, --series, --narrator, and --year gap-fill empty "
+            "fields per book; --author, --title, and --sequence are rejected"
+        ),
+    )
+    parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help=(
+            "with --batch on apply runs, continue organizing remaining books after "
+            "a failure (default: stop on first failure; dry-run always tries all books)"
         ),
     )
     return parser
@@ -147,6 +157,13 @@ def _metadata_overrides_from_args(args: argparse.Namespace) -> MetadataOverrides
     return None
 
 
+def _format_json_source(path: Path) -> str:
+    resolved = path.resolve()
+    if resolved.is_dir():
+        return f"{resolved}/"
+    return str(resolved)
+
+
 def _success_payload(
     result: OrganizeResult, warnings: tuple[str, ...]
 ) -> dict[str, object]:
@@ -158,8 +175,34 @@ def _success_payload(
     }
 
 
+def _batch_book_json_entry(outcome: BookOutcome) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "source": _format_json_source(outcome.book_input),
+        "warnings": list(outcome.warnings),
+        "ok": outcome.ok,
+    }
+    if outcome.ok and outcome.result is not None:
+        dest = outcome.result.dest_dir.resolve()
+        entry["destination"] = f"{dest}/"
+        entry["files"] = list(outcome.result.copied_files)
+    else:
+        entry["error"] = outcome.error or "Unknown error"
+    return entry
+
+
+def _batch_json_payload(batch: BatchResult) -> dict[str, object]:
+    return {
+        "books": [_batch_book_json_entry(outcome) for outcome in batch.outcomes],
+        "summary": {"ok": batch.ok_count, "failed": batch.failed_count},
+    }
+
+
 def _print_json(result: OrganizeResult, warnings: tuple[str, ...]) -> None:
     print(json.dumps(_success_payload(result, warnings), indent=2))
+
+
+def _print_batch_json(batch: BatchResult) -> None:
+    print(json.dumps(_batch_json_payload(batch), indent=2))
 
 
 def _print_result(
@@ -206,24 +249,17 @@ def _run_batch(
         move=args.move,
         replace=args.replace,
         allow_guess=args.allow_guess,
+        continue_on_error=args.continue_on_error,
         on_log=on_log,
     )
 
     if args.json:
-        if len(batch.outcomes) > 1:
-            print(
-                "Batch JSON output is not supported for multi-book runs in this version.",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
-        if len(batch.outcomes) != 1 or not batch.outcomes[0].ok:
-            if len(batch.outcomes) == 1 and batch.outcomes[0].error:
-                print(batch.outcomes[0].error, file=sys.stderr)
-            raise SystemExit(_batch_exit_code(batch))
-        outcome = batch.outcomes[0]
-        assert outcome.result is not None
-        _print_json(outcome.result, outcome.warnings)
-        raise SystemExit(0)
+        _print_batch_json(batch)
+        if batch.ok_count != len(batch.outcomes):
+            for outcome in batch.outcomes:
+                if not outcome.ok and outcome.error:
+                    print(outcome.error, file=sys.stderr)
+        raise SystemExit(_batch_exit_code(batch))
 
     for index, outcome in enumerate(batch.outcomes):
         if index > 0:

@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from abs_organize.batch import organize_batch
+from abs_organize.batch import organize_batch, validate_batch_override_policy
+from abs_organize.metadata import MetadataOverrides, ValidationError
 from abs_organize.metadata import MetadataError, MetadataOverrides, ValidationError
 from abs_organize.organize import organize, organize_file
 
@@ -747,6 +748,174 @@ def test_cli_batch_apply_two_subfolders(tmp_path, make_tagged_mp3, capsys):
     assert (library / "Jane Author" / "Beta" / "01.mp3").is_file()
     err = capsys.readouterr().err
     assert "Batch complete: 2 ok, 0 failed" in err
+
+
+def test_organize_batch_infers_volume_from_numbered_folders(
+    tmp_path, make_tagged_mp3
+):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    for folder, album in (("01 - Alpha", "Alpha"), ("02 - Beta", "Beta")):
+        book_dir = inbox / folder
+        book_dir.mkdir()
+        path = make_tagged_mp3(
+            name="01.mp3", albumartist="Jane Author", album=album
+        )
+        path.rename(book_dir / path.name)
+    library = tmp_path / "library"
+    library.mkdir()
+
+    batch = organize_batch(inbox, library, dry_run=True)
+
+    assert batch.ok_count == 2
+    names = {outcome.result.dest_dir.name for outcome in batch.outcomes}
+    assert names == {"Vol 1 - Alpha", "Vol 2 - Beta"}
+
+
+def test_organize_batch_folder_sequence_not_from_wrapper_name(
+    tmp_path, make_tagged_mp3
+):
+    wrapper = tmp_path / "99 - Box Set"
+    wrapper.mkdir()
+    book_dir = wrapper / "01 - Alpha"
+    book_dir.mkdir()
+    path = make_tagged_mp3(
+        name="01.mp3", albumartist="Jane Author", album="Alpha"
+    )
+    path.rename(book_dir / path.name)
+    library = tmp_path / "library"
+    library.mkdir()
+
+    batch = organize_batch(wrapper, library, dry_run=True)
+
+    assert batch.outcomes[0].result is not None
+    assert batch.outcomes[0].result.dest_dir.name == "Vol 1 - Alpha"
+
+
+def test_organize_batch_folder_sequence_does_not_override_tags(
+    tmp_path, make_tagged_m4b_with_movement
+):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    book_dir = inbox / "01 - Alpha"
+    book_dir.mkdir()
+    path = make_tagged_m4b_with_movement(
+        name="book.m4b",
+        albumartist="Jane Author",
+        album="Alpha",
+        movement_name="Series",
+        movement_index=5,
+    )
+    path.rename(book_dir / path.name)
+    library = tmp_path / "library"
+    library.mkdir()
+
+    batch = organize_batch(inbox, library, dry_run=True)
+
+    assert batch.outcomes[0].result is not None
+    assert batch.outcomes[0].result.dest_dir.name == "Vol 5 - Alpha"
+
+
+def test_organize_batch_multi_root_series_gap_fill(tmp_path, make_tagged_mp3):
+    inbox, library = _two_book_subfolder_inbox(tmp_path, make_tagged_mp3)
+
+    batch = organize_batch(
+        inbox,
+        library,
+        overrides=MetadataOverrides(series="Shared Series"),
+        dry_run=True,
+    )
+
+    assert batch.ok_count == 2
+    for outcome in batch.outcomes:
+        assert outcome.result is not None
+        assert outcome.result.dest_dir.parent.name == "Shared Series"
+
+
+def test_organize_batch_multi_root_series_gap_fill_skips_tagged_series(
+    tmp_path, make_tagged_mp3
+):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    for folder, album, series in (
+        ("bookA", "Alpha", "Tagged Series"),
+        ("bookB", "Beta", None),
+    ):
+        book_dir = inbox / folder
+        book_dir.mkdir()
+        tags = {"albumartist": "Jane Author", "album": album}
+        if series:
+            tags["grouping"] = series
+        path = make_tagged_mp3(name="01.mp3", **tags)
+        path.rename(book_dir / path.name)
+    library = tmp_path / "library"
+    library.mkdir()
+
+    batch = organize_batch(
+        inbox,
+        library,
+        overrides=MetadataOverrides(series="Shared Series"),
+        dry_run=True,
+    )
+
+    series_dirs = {outcome.result.dest_dir.parent.name for outcome in batch.outcomes}
+    assert series_dirs == {"Tagged Series", "Shared Series"}
+
+
+def test_organize_batch_single_root_series_cli_override(tmp_path, make_tagged_mp3):
+    book = tmp_path / "single"
+    book.mkdir()
+    path = make_tagged_mp3(
+        name="01.mp3", albumartist="Jane Author", album="Book Title"
+    )
+    path.rename(book / path.name)
+    library = tmp_path / "library"
+    library.mkdir()
+
+    batch = organize_batch(
+        book,
+        library,
+        overrides=MetadataOverrides(series="CLI Series"),
+        dry_run=True,
+    )
+
+    assert batch.outcomes[0].result is not None
+    assert batch.outcomes[0].result.dest_dir.parent.name == "CLI Series"
+
+
+def test_organize_batch_forbidden_author_multi_root(tmp_path, make_tagged_mp3):
+    inbox, _library = _two_book_subfolder_inbox(tmp_path, make_tagged_mp3)
+    roots = [inbox / "bookA", inbox / "bookB"]
+
+    with pytest.raises(ValidationError, match="--author"):
+        validate_batch_override_policy(
+            roots, MetadataOverrides(author="One Author")
+        )
+
+
+def test_organize_batch_apply_continue_on_error(tmp_path, make_tagged_mp3):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    for folder, album in (("bookA", "Alpha"), ("bookB", "Beta"), ("bookC", "Gamma")):
+        book_dir = inbox / folder
+        book_dir.mkdir()
+        path = make_tagged_mp3(
+            name="01.mp3", albumartist="Jane Author", album=album
+        )
+        path.rename(book_dir / path.name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+    organize_file(inbox / "bookB" / "01.mp3", library)
+
+    batch = organize_batch(
+        inbox, library, continue_on_error=True
+    )
+
+    assert batch.ok_count == 2
+    assert batch.failed_count == 1
+    assert len(batch.outcomes) == 3
+    assert (library / "Jane Author" / "Gamma").exists()
 
 
 def test_organize_collision_aborts_without_replace(tmp_path, make_tagged_mp3):
