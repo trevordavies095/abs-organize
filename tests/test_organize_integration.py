@@ -167,6 +167,127 @@ def test_organize_no_majority_title_copies_nothing(tmp_path, make_tagged_mp3):
     assert not (library / "Jane Author").exists()
 
 
+def test_organize_dry_run_single_file(tmp_path, make_tagged_mp3):
+    source = make_tagged_mp3(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+    library_mtime_before = library.stat().st_mtime
+
+    result, warnings = organize(source, library, dry_run=True)
+
+    assert warnings == ()
+    assert result.dest_dir == library / "Jane Author" / "Book Title"
+    assert result.copied_files == ("book.mp3",)
+    assert not (library / "Jane Author").exists()
+    assert library.stat().st_mtime == library_mtime_before
+    assert source.is_file()
+
+
+def test_cli_dry_run_prints_plan_and_leaves_library_empty(
+    tmp_path, make_tagged_mp3, capsys
+):
+    from abs_organize.cli import main
+
+    source = make_tagged_mp3(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+    library_mtime_before = library.stat().st_mtime
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(source), "--library", str(library), "--dry-run"])
+
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert f"Library: {library}" in out
+    assert "Destination:" in out
+    assert "Planned:" in out
+    assert "book.mp3 → Jane Author/Book Title/book.mp3" in out
+    assert "Copied:" not in out
+    assert not (library / "Jane Author").exists()
+    assert library.stat().st_mtime == library_mtime_before
+
+
+def test_cli_dry_run_missing_metadata_exits_1(make_tagged_mp3, tmp_path, capsys):
+    from abs_organize.cli import main
+
+    source = make_tagged_mp3()
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(source), "--library", str(library), "--dry-run"])
+
+    assert exc.value.code == 1
+    assert "Missing required metadata" in capsys.readouterr().err
+    assert not list(library.iterdir())
+
+
+def test_organize_dry_run_multi_track_folder(tmp_path, make_tagged_mp3, capsys):
+    from abs_organize.cli import main
+
+    tracks_dir = tmp_path / "tracks"
+    tracks_dir.mkdir()
+    tags = {"albumartist": "Jane Author", "album": "Book Title"}
+    for i in range(1, 4):
+        name = f"{i:02d}.mp3"
+        path = make_tagged_mp3(name=name, **tags)
+        path.rename(tracks_dir / name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result, warnings = organize(tracks_dir, library, dry_run=True)
+
+    assert warnings == ()
+    assert result.dest_dir == library / "Jane Author" / "Book Title"
+    assert result.copied_files == ("01.mp3", "02.mp3", "03.mp3")
+    assert not (library / "Jane Author").exists()
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(tracks_dir), "--library", str(library), "--dry-run"])
+
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "01.mp3 → Jane Author/Book Title/01.mp3" in out
+    assert "03.mp3 → Jane Author/Book Title/03.mp3" in out
+
+
+def test_cli_dry_run_multi_track_tag_conflict_warns(
+    tmp_path, make_tagged_mp3, capsys
+):
+    from abs_organize.cli import main
+
+    tracks_dir = tmp_path / "tracks"
+    tracks_dir.mkdir()
+    for name, album in (
+        ("01.mp3", "Book One"),
+        ("02.mp3", "Book One"),
+        ("03.mp3", "Book Two"),
+    ):
+        path = make_tagged_mp3(
+            name=name, albumartist="Jane Author", album=album
+        )
+        path.rename(tracks_dir / name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(tracks_dir), "--library", str(library), "--dry-run"])
+
+    assert exc.value.code == 0
+    captured = capsys.readouterr()
+    assert any("title tag conflict" in w for w in captured.err.splitlines())
+    assert "Planned:" in captured.out
+    assert not (library / "Jane Author").exists()
+
+
 def test_organize_cli_overrides_fix_bad_rip(
     tmp_path, make_tagged_mp3, capsys
 ):

@@ -69,6 +69,10 @@ def _build_dest_dir(
     return dest_dir
 
 
+def _planned_filenames(sources: list[Path]) -> tuple[str, ...]:
+    return tuple(source.name for source in sources)
+
+
 def _copy_files(sources: list[Path], dest_dir: Path) -> tuple[str, ...]:
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -92,6 +96,7 @@ def organize(
     *,
     overrides: MetadataOverrides | None = None,
     include_subtitle_in_folder: bool = False,
+    dry_run: bool = False,
     on_log: Callable[[str], None] | None = None,
 ) -> tuple[OrganizeResult, tuple[str, ...]]:
     input_path = input_path.resolve()
@@ -119,7 +124,10 @@ def organize(
         include_subtitle_in_folder=include_subtitle_in_folder,
         on_log=on_log,
     )
-    copied_files = _copy_files(track_files, dest_dir)
+    if dry_run:
+        copied_files = _planned_filenames(track_files)
+    else:
+        copied_files = _copy_files(track_files, dest_dir)
 
     return (
         OrganizeResult(

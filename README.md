@@ -17,12 +17,13 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
-abs-organize INPUT [--profile NAME] [--library PATH] [-v|--verbose]
+abs-organize INPUT [--profile NAME] [--library PATH] [--dry-run] [-v|--verbose]
 ```
 
-- **INPUT** — path to a single `.mp3`, `.m4b`, or `.m4a` file
+- **INPUT** — path to a single audio file or a directory of tracks (`.mp3`, `.m4b`, `.m4a`, `.flac`, `.ogg`)
 - **--profile** — named library profile from config (uses `default` when omitted)
 - **--library** — library root for this run only (overrides config and env)
+- **--dry-run** — print library root, destination, and planned copies; make no changes
 - **-v / --verbose** — log path segment sanitization details to stderr
 
 When `[libraries.default]` is configured, you can omit `--library`:
@@ -35,6 +36,15 @@ Example with an explicit library path (no config required):
 
 ```bash
 abs-organize ~/Downloads/book.m4b --library ~/Audiobooks
+```
+
+### Preview first
+
+Use `--dry-run` to verify naming before writing. It runs the same metadata validation as a real organize and prints warnings to stderr, but does not create directories or copy files under the library. Omit the flag to apply (copy) into the library.
+
+```bash
+abs-organize ~/Downloads/inbox/SomeBook --dry-run --library ~/Audiobooks
+abs-organize ~/Downloads/inbox/SomeBook --library ~/Audiobooks
 ```
 
 Metadata is read from embedded tags (Mutagen). Author comes from `albumartist` or `artist`; title from `album` or `title`. Optional tags drive ABS-style folders: `grouping` (series), `date` (year), `composer` (narrator), and on `.m4b`/`.m4a` iTunes movement atoms when present.
@@ -92,4 +102,4 @@ pytest
 
 ## Roadmap
 
-Dry-run, multi-file folders, covers, and move/replace options are planned in later issues.
+Covers, and move/replace options are planned in later issues.

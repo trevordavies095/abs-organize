@@ -75,6 +75,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="log path segment sanitization details to stderr",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="preview destination and planned copies without modifying the library",
+    )
     return parser
 
 
@@ -102,12 +107,24 @@ def _metadata_overrides_from_args(args: argparse.Namespace) -> MetadataOverrides
     return None
 
 
-def _print_result(result: OrganizeResult) -> None:
+def _print_result(
+    result: OrganizeResult,
+    *,
+    library: Path,
+    dry_run: bool = False,
+) -> None:
+    print(f"Library: {library}")
     print(f"Source: {result.source}")
     print(f"Destination: {result.dest_dir}/")
-    print("Copied:")
-    for name in result.copied_files:
-        print(f"  {name}")
+    if dry_run:
+        print("Planned:")
+        dest_relative = result.dest_dir.relative_to(library)
+        for name in result.copied_files:
+            print(f"  {name} → {dest_relative / name}")
+    else:
+        print("Copied:")
+        for name in result.copied_files:
+            print(f"  {name}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -128,6 +145,7 @@ def main(argv: list[str] | None = None) -> None:
             library,
             overrides=_metadata_overrides_from_args(args),
             include_subtitle_in_folder=_load_include_subtitle_in_folder(),
+            dry_run=args.dry_run,
             on_log=on_log,
         )
     except ConfigError as exc:
@@ -146,7 +164,7 @@ def main(argv: list[str] | None = None) -> None:
     for warning in warnings:
         print(warning, file=sys.stderr)
 
-    _print_result(result)
+    _print_result(result, library=library, dry_run=args.dry_run)
     raise SystemExit(0)
 
 
