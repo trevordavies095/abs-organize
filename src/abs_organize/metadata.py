@@ -377,6 +377,14 @@ def resolve_majority(
     warnings: list[str] = []
     fields: dict[str, Any] = {}
 
+    title_override = overrides.title
+    suffix_narrator_from_title: str | None = None
+    if overrides.title is not None:
+        clean_title, suffix_narrator = split_title_and_narrator(overrides.title)
+        if suffix_narrator is not None:
+            title_override = clean_title
+            suffix_narrator_from_title = suffix_narrator
+
     field_specs: list[tuple[str, Callable[[BookMetadata], Any], bool]] = [
         ("author", lambda m: m.author, True),
         ("title", lambda m: m.title, True),
@@ -388,7 +396,7 @@ def resolve_majority(
     ]
     override_fields = {
         "author": overrides.author,
-        "title": overrides.title,
+        "title": title_override,
         "year": overrides.year,
         "series": overrides.series,
         "sequence": overrides.sequence,
@@ -409,6 +417,13 @@ def resolve_majority(
         fields[field_name] = value
         if warning:
             warnings.append(warning)
+
+    if (
+        fields.get("narrator") is None
+        and suffix_narrator_from_title is not None
+        and overrides.narrator is None
+    ):
+        fields["narrator"] = suffix_narrator_from_title
 
     metadata = BookMetadata(
         author=fields["author"],

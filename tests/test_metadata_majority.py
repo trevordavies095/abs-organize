@@ -78,6 +78,46 @@ def test_optional_field_all_empty_returns_none():
     assert resolved.metadata.narrator is None
 
 
+def test_title_override_strips_suffix_and_sets_narrator():
+    per_file = [_meta(), _meta()]
+    resolved = resolve_majority(
+        per_file,
+        overrides=MetadataOverrides(
+            title="A Game of Thrones (read by Roy Dotrice)",
+        ),
+    )
+    assert resolved.metadata.title == "A Game of Thrones"
+    assert resolved.metadata.narrator == "Roy Dotrice"
+
+
+def test_title_override_strips_suffix_cli_narrator_wins():
+    per_file = [_meta(), _meta()]
+    resolved = resolve_majority(
+        per_file,
+        overrides=MetadataOverrides(
+            title="A Game of Thrones (read by Roy Dotrice)",
+            narrator="Other Narrator",
+        ),
+    )
+    assert resolved.metadata.title == "A Game of Thrones"
+    assert resolved.metadata.narrator == "Other Narrator"
+
+
+def test_title_override_strips_suffix_tag_narrator_wins():
+    per_file = [
+        _meta(narrator="Roy Dotrice"),
+        _meta(narrator="Roy Dotrice"),
+    ]
+    resolved = resolve_majority(
+        per_file,
+        overrides=MetadataOverrides(
+            title="A Game of Thrones (read by Other Narrator)",
+        ),
+    )
+    assert resolved.metadata.title == "A Game of Thrones"
+    assert resolved.metadata.narrator == "Roy Dotrice"
+
+
 def test_resolve_book_metadata_applies_overrides(tmp_path, make_tagged_mp3):
     from abs_organize.metadata import resolve_book_metadata
 

@@ -1350,3 +1350,36 @@ def test_organize_splits_album_narrator_suffix_in_title_folder(
     result = organize_file(book, library)
 
     assert result.dest_dir.name == "1996 - A Game of Thrones {Roy Dotrice}"
+
+
+def test_organize_cli_title_override_strips_narrator_suffix(
+    tmp_path, make_tagged_mp3
+):
+    from abs_organize.cli import main
+
+    book = tmp_path / "download"
+    book.mkdir()
+    track = make_tagged_mp3(
+        albumartist="George R. R. Martin",
+        album="Generic Album Title",
+        date="1996",
+    )
+    track.rename(book / track.name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                str(book),
+                "--library",
+                str(library),
+                "--title",
+                "A Game of Thrones (read by Roy Dotrice)",
+            ]
+        )
+    assert exc.value.code == 0
+
+    dest = library / "George R. R. Martin" / "1996 - A Game of Thrones {Roy Dotrice}"
+    assert dest.is_dir()
