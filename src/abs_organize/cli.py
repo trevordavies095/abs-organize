@@ -9,6 +9,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -96,6 +97,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "(destructive; requires an explicit choice when the destination exists)"
         ),
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="on success, print minimal JSON to stdout (for scripting)",
+    )
     return parser
 
 
@@ -121,6 +127,21 @@ def _metadata_overrides_from_args(args: argparse.Namespace) -> MetadataOverrides
     ):
         return overrides
     return None
+
+
+def _success_payload(
+    result: OrganizeResult, warnings: tuple[str, ...]
+) -> dict[str, object]:
+    dest = result.dest_dir.resolve()
+    return {
+        "destination": f"{dest}/",
+        "files": list(result.copied_files),
+        "warnings": list(warnings),
+    }
+
+
+def _print_json(result: OrganizeResult, warnings: tuple[str, ...]) -> None:
+    print(json.dumps(_success_payload(result, warnings), indent=2))
 
 
 def _print_result(
@@ -179,10 +200,12 @@ def main(argv: list[str] | None = None) -> None:
         print(exc, file=sys.stderr)
         raise SystemExit(2) from exc
 
-    for warning in warnings:
-        print(warning, file=sys.stderr)
-
-    _print_result(result, library=library, dry_run=args.dry_run)
+    if args.json:
+        _print_json(result, warnings)
+    else:
+        for warning in warnings:
+            print(warning, file=sys.stderr)
+        _print_result(result, library=library, dry_run=args.dry_run)
     raise SystemExit(0)
 
 

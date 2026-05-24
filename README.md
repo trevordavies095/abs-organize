@@ -17,7 +17,7 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
-abs-organize INPUT [--profile NAME] [--library PATH] [--dry-run] [--replace] [--allow-guess] [-v|--verbose]
+abs-organize INPUT [--profile NAME] [--library PATH] [--dry-run] [--replace] [--allow-guess] [--json] [-v|--verbose]
 ```
 
 - **INPUT** — path to a single audio file or a directory of tracks (`.mp3`, `.m4b`, `.m4a`, `.flac`, `.ogg`)
@@ -26,6 +26,7 @@ abs-organize INPUT [--profile NAME] [--library PATH] [--dry-run] [--replace] [--
 - **--dry-run** — print library root, destination, and planned copies; make no changes
 - **--replace** — delete the entire existing destination title folder, then copy (destructive; use when re-organizing)
 - **--allow-guess** — when author/title tags are missing, guess them from the book folder or file name (low confidence; see below)
+- **--json** — on success, print minimal JSON to stdout (for scripting); errors stay on stderr as plain text
 - **-v / --verbose** — log path segment sanitization details to stderr
 
 When `[libraries.default]` is configured, you can omit `--library`:
@@ -113,6 +114,24 @@ Set `ABS_ORGANIZE_LIBRARY` to override the default profile path without editing 
 | 0 | Success |
 | 1 | User or metadata error (missing tags, invalid paths, config/profile errors) |
 | 2 | I/O error (copy or filesystem failure) |
+
+## JSON output
+
+With `--json`, a successful run prints a single JSON object to stdout (human-readable lines are omitted). Warnings are included in the payload, not duplicated on stderr. Failed runs print an error message on stderr and exit `1` or `2` without success JSON.
+
+```json
+{
+  "destination": "/Users/you/Audiobooks/Jane Author/Book Title/",
+  "files": ["book.mp3"],
+  "warnings": ["album tag conflict: ..."]
+}
+```
+
+- **destination** — absolute path to the title folder, with a trailing `/`
+- **files** — paths relative to the title folder (audio, sidecars, cover when present)
+- **warnings** — non-fatal notices (tag conflicts, collision hints on dry-run, etc.)
+
+Additional top-level keys may be added in later versions (`profile`, `dry_run`, …) without breaking consumers that ignore unknown fields.
 
 ## Tests
 
