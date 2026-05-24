@@ -33,6 +33,14 @@ _NARRATOR_PREFIX = re.compile(
     r"^(?:narrated\s+by|read\s+by|performed\s+by)(?:\s+|$)",
     re.IGNORECASE,
 )
+_TITLE_NARRATOR_SUFFIX = re.compile(
+    r"^(?P<prefix>.+?)\s+"
+    r"(?:\(\s*|\[\s*)"
+    r"(?:read\s+by|narrated\s+by|performed\s+by)\s+"
+    r"(?P<name>[^)\]]+)"
+    r"(?:\)|\])\s*$",
+    re.IGNORECASE,
+)
 _WHITESPACE = re.compile(r"\s+")
 
 
@@ -118,6 +126,28 @@ def _normalize_narrator_optional(value: str | None) -> str | None:
     return normalized or None
 
 
+def split_title_and_narrator(title: str) -> tuple[str, str | None]:
+    """Split a trailing narrator clause from a title string.
+
+    Returns ``(clean_title, narrator)`` on success, or ``(title, None)`` when
+    the string does not match or stripping would be invalid (empty name or
+    empty title).
+    """
+    match = _TITLE_NARRATOR_SUFFIX.match(title.strip())
+    if match is None:
+        return title, None
+
+    narrator = normalize_narrator(match.group("name"))
+    if not narrator:
+        return title, None
+
+    clean_title = match.group("prefix").strip()
+    if not clean_title:
+        return title, None
+
+    return clean_title, narrator
+
+
 def _mp4_atom_text(tags: object, key: str) -> str | None:
     if tags is None:
         return None
@@ -194,6 +224,14 @@ def read_tags(path: Path) -> object:
 def resolve_metadata(tags: object, *, lenient: bool = False) -> BookMetadata:
     author = _first_tag(tags, AUTHOR_KEYS)
     title = _first_tag(tags, TITLE_KEYS)
+    tag_narrator = _normalize_narrator_optional(_first_tag(tags, NARRATOR_KEYS))
+
+    if title:
+        clean_title, suffix_narrator = split_title_and_narrator(title)
+        if suffix_narrator is not None:
+            title = clean_title
+            if tag_narrator is None:
+                tag_narrator = suffix_narrator
 
     if not lenient:
         missing: list[str] = []
@@ -214,7 +252,7 @@ def resolve_metadata(tags: object, *, lenient: bool = False) -> BookMetadata:
         title=title or "",
         series=_first_tag(tags, SERIES_KEYS),
         year=parse_year(_first_tag(tags, YEAR_KEYS)),
-        narrator=_normalize_narrator_optional(_first_tag(tags, NARRATOR_KEYS)),
+        narrator=tag_narrator,
         subtitle=_first_tag(tags, SUBTITLE_KEYS),
     )
 

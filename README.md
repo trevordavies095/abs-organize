@@ -91,6 +91,8 @@ Tags are read with [Mutagen](https://mutagen.readthedocs.io/):
 | Title folder | `album` or `title` (+ optional `subtitle` via config) |
 | Series | `grouping`; sequence/year/narrator from tags, movement atoms (`.m4b`/`.m4a`), or OPF when present |
 
+When **`album`** or **`title`** ends with a trailing narrator clause — ` (read by …)`, ` (narrated by …)`, or ` (performed by …)` (or the same phrases in square brackets) — that clause is removed from the title folder name. The extracted name becomes **narrator** only if the `composer` tag is empty; if `composer` is set, it wins for the `{Narrator}` segment and the suffix is still stripped from the title.
+
 Missing **author** or **title** tags exit with an error unless **`--allow-guess`** is set. Guesses use patterns such as `Author - Title` or `Author - Title (YYYY)` on the book folder or file stem; stderr marks them `(confidence: low)`. CLI overrides always win.
 
 **Example (series layout):**

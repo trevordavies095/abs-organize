@@ -67,6 +67,39 @@ def test_resolve_strips_narrator_prefix_from_composer():
     assert meta.narrator == "Joyce Bean"
 
 
+def test_resolve_splits_album_narrator_suffix():
+    tags = _FakeTags(
+        albumartist=["George R. R. Martin"],
+        album=["A Game of Thrones (read by Roy Dotrice)"],
+        date=["1996"],
+    )
+    meta = resolve_metadata(tags)
+    assert meta.title == "A Game of Thrones"
+    assert meta.narrator == "Roy Dotrice"
+    assert meta.year == 1996
+
+
+def test_resolve_splits_title_tag_narrator_suffix():
+    tags = _FakeTags(
+        artist=["Jane Author"],
+        title=["Book Title (narrated by Sam Tsoutsouvas)"],
+    )
+    meta = resolve_metadata(tags)
+    assert meta.title == "Book Title"
+    assert meta.narrator == "Sam Tsoutsouvas"
+
+
+def test_resolve_strips_suffix_but_composer_wins_narrator():
+    tags = _FakeTags(
+        albumartist=["Author"],
+        album=["A Game of Thrones (read by Other Narrator)"],
+        composer=["Roy Dotrice"],
+    )
+    meta = resolve_metadata(tags)
+    assert meta.title == "A Game of Thrones"
+    assert meta.narrator == "Roy Dotrice"
+
+
 def test_parse_year_from_iso_date():
     assert parse_year("1994-01-01") == 1994
 

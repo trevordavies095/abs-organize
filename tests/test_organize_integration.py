@@ -1330,3 +1330,23 @@ def test_organize_strips_narrator_prefix_in_title_folder(tmp_path, make_tagged_m
     result = organize_file(book, library)
 
     assert result.dest_dir.name == "2007 - Beyond Reach {Joyce Bean}"
+
+
+def test_organize_splits_album_narrator_suffix_in_title_folder(
+    tmp_path, make_tagged_mp3
+):
+    book = tmp_path / "download"
+    book.mkdir()
+    track = make_tagged_mp3(
+        albumartist="George R. R. Martin",
+        album="A Game of Thrones (read by Roy Dotrice)",
+        date="1996",
+    )
+    track.rename(book / track.name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result = organize_file(book, library)
+
+    assert result.dest_dir.name == "1996 - A Game of Thrones {Roy Dotrice}"
