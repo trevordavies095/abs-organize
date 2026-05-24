@@ -121,3 +121,23 @@ def test_cli_io_failure_exits_2(tmp_path, make_tagged_mp3, capsys):
     captured = capsys.readouterr()
     assert "disk full" in captured.err or "Failed to copy" in captured.err
     assert captured.out.strip() == ""
+
+
+def test_cli_move_io_failure_exits_2(tmp_path, make_tagged_mp3, capsys):
+    from abs_organize.cli import main
+
+    source = make_tagged_mp3(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with patch("abs_organize.organize.shutil.move", side_effect=OSError("disk full")):
+        with pytest.raises(SystemExit) as exc:
+            main([str(source), "--library", str(library), "--move"])
+
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert "disk full" in captured.err or "Failed to move" in captured.err
+    assert captured.out.strip() == ""

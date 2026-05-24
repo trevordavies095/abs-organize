@@ -1,4 +1,4 @@
-"""Copy tagged audio into the library layout."""
+"""Copy or move tagged audio into the library layout (copy by default)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from abs_organize.covers import resolve_cover, write_cover_jpg
+from abs_organize.covers import CoverSource, resolve_cover, write_cover_jpg
 from abs_organize.discovery import (
     BookAudio,
     collect_book_audio,
@@ -86,7 +86,7 @@ def _collision_warnings(
         messages.append("Would delete existing title folder (--replace).")
     elif not replace:
         messages.append(
-            "Re-run with --replace to delete the existing title folder and copy again."
+            "Re-run with --replace to delete the existing title folder and organize again."
         )
     return tuple(messages)
 
@@ -107,18 +107,28 @@ def _assert_replace_safe(dest_dir: Path, library_path: Path) -> None:
         )
 
 
-def _copy_sidecars(sidecars: list[Path], dest_dir: Path) -> tuple[str, ...]:
-    copied: list[str] = []
+def _transfer_path(src: Path, dest: Path, *, move: bool) -> None:
+    if move:
+        shutil.move(src, dest)
+    else:
+        shutil.copy2(src, dest)
+
+
+def _transfer_sidecars(
+    sidecars: list[Path], dest_dir: Path, *, move: bool
+) -> tuple[str, ...]:
+    verb = "move" if move else "copy"
+    transferred: list[str] = []
     for sidecar in sidecars:
         dest_file = dest_dir / sidecar.name
         try:
-            shutil.copy2(sidecar, dest_file)
+            _transfer_path(sidecar, dest_file, move=move)
         except OSError as exc:
             raise OrganizeIOError(
-                f"Failed to copy sidecar {sidecar.name}: {exc}"
+                f"Failed to {verb} sidecar {sidecar.name}: {exc}"
             ) from exc
-        copied.append(sidecar.name)
-    return tuple(copied)
+        transferred.append(sidecar.name)
+    return tuple(transferred)
 
 
 def _resolve_gap_fill_sources(
@@ -152,23 +162,30 @@ def _apply_supplemental_files(
     sidecars: list[Path],
     dest_dir: Path,
     dry_run: bool,
+    move: bool = False,
+    cover: CoverSource | None = None,
+    cover_already_resolved: bool = False,
     on_log: Callable[[str], None] | None = None,
 ) -> tuple[str, ...]:
-    copied: list[str] = []
+    transferred: list[str] = []
+    file_verb = "move" if move else "copy"
 
-    cover = resolve_cover(sidecar_root_path, track_files)
+    if not cover_already_resolved:
+        cover = resolve_cover(sidecar_root_path, track_files)
+
     if cover is not None:
         if dry_run:
-            copied.append("Cover.jpg")
+            transferred.append("Cover.jpg")
             if on_log is not None:
                 if cover.has_sidecar:
                     on_log(
-                        f"Would copy cover from {cover.sidecar_path.name} as Cover.jpg"
+                        f"Would {file_verb} cover from {cover.sidecar_path.name} "
+                        "as Cover.jpg"
                     )
                 else:
                     on_log("Would extract embedded cover as Cover.jpg")
         else:
-            copied.append(write_cover_jpg(dest_dir, cover))
+            transferred.append(write_cover_jpg(dest_dir, cover, move=move))
             if on_log is not None:
                 if cover.has_sidecar:
                     on_log(
@@ -179,30 +196,34 @@ def _apply_supplemental_files(
 
     if sidecars:
         if dry_run:
-            copied.extend(sidecar.name for sidecar in sidecars)
+            transferred.extend(sidecar.name for sidecar in sidecars)
             if on_log is not None:
                 for sidecar in sidecars:
-                    on_log(f"Would copy sidecar: {sidecar.name}")
+                    on_log(f"Would {file_verb} sidecar: {sidecar.name}")
         else:
-            copied.extend(_copy_sidecars(sidecars, dest_dir))
+            transferred.extend(_transfer_sidecars(sidecars, dest_dir, move=move))
             if on_log is not None:
                 for sidecar in sidecars:
-                    on_log(f"Copied sidecar: {sidecar.name}")
+                    action = "Moved" if move else "Copied"
+                    on_log(f"{action} sidecar: {sidecar.name}")
 
-    return tuple(copied)
+    return tuple(transferred)
 
 
 def _planned_filenames(audio: list[BookAudio]) -> tuple[str, ...]:
     return tuple(item.dest_relative.as_posix() for item in audio)
 
 
-def _copy_files(audio: list[BookAudio], dest_dir: Path) -> tuple[str, ...]:
+def _transfer_files(
+    audio: list[BookAudio], dest_dir: Path, *, move: bool
+) -> tuple[str, ...]:
+    verb = "move" if move else "copy"
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise OrganizeIOError(f"Failed to create destination directory: {exc}") from exc
 
-    copied: list[str] = []
+    transferred: list[str] = []
     for item in audio:
         dest_file = dest_dir / item.dest_relative
         try:
@@ -212,13 +233,13 @@ def _copy_files(audio: list[BookAudio], dest_dir: Path) -> tuple[str, ...]:
                 f"Failed to create directory for {item.dest_relative}: {exc}"
             ) from exc
         try:
-            shutil.copy2(item.source, dest_file)
+            _transfer_path(item.source, dest_file, move=move)
         except OSError as exc:
             raise OrganizeIOError(
-                f"Failed to copy {item.dest_relative.as_posix()}: {exc}"
+                f"Failed to {verb} {item.dest_relative.as_posix()}: {exc}"
             ) from exc
-        copied.append(item.dest_relative.as_posix())
-    return tuple(copied)
+        transferred.append(item.dest_relative.as_posix())
+    return tuple(transferred)
 
 
 def organize(
@@ -228,6 +249,7 @@ def organize(
     overrides: MetadataOverrides | None = None,
     include_subtitle_in_folder: bool = False,
     dry_run: bool = False,
+    move: bool = False,
     replace: bool = False,
     allow_guess: bool = False,
     on_log: Callable[[str], None] | None = None,
@@ -293,10 +315,16 @@ def organize(
                 f"Destination title folder already exists: {dest_dir}"
             )
 
+    resolved_cover: CoverSource | None = None
+    cover_already_resolved = False
+    if not dry_run:
+        resolved_cover = resolve_cover(sidecar_root_path, track_files)
+        cover_already_resolved = True
+
     if dry_run:
         copied_files = list(_planned_filenames(book_audio))
     else:
-        copied_files = list(_copy_files(book_audio, dest_dir))
+        copied_files = list(_transfer_files(book_audio, dest_dir, move=move))
 
     copied_files.extend(
         _apply_supplemental_files(
@@ -305,6 +333,9 @@ def organize(
             sidecars=copy_sidecars,
             dest_dir=dest_dir,
             dry_run=dry_run,
+            move=move,
+            cover=resolved_cover,
+            cover_already_resolved=cover_already_resolved,
             on_log=on_log,
         )
     )
@@ -324,6 +355,7 @@ def organize_file(
     library_path: Path,
     *,
     include_subtitle_in_folder: bool = False,
+    move: bool = False,
     replace: bool = False,
     on_log: Callable[[str], None] | None = None,
 ) -> OrganizeResult:
@@ -331,6 +363,7 @@ def organize_file(
         input_path,
         library_path,
         include_subtitle_in_folder=include_subtitle_in_folder,
+        move=move,
         replace=replace,
         on_log=on_log,
     )

@@ -787,6 +787,143 @@ def test_replace_refuses_library_root(tmp_path):
         _assert_replace_safe(library, library)
 
 
+def test_organize_move_removes_source_single_file(tmp_path, make_tagged_mp3):
+    source = make_tagged_mp3(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result = organize_file(source, library, move=True)
+
+    dest = library / "Jane Author" / "Book Title" / "book.mp3"
+    assert dest.is_file()
+    assert result.dest_dir == dest.parent
+    assert result.copied_files == ("book.mp3",)
+    assert not source.is_file()
+
+
+def test_organize_move_multi_disc(tmp_path, make_tagged_mp3):
+    book = tmp_path / "BookName"
+    book.mkdir()
+    tags = {"albumartist": "Jane Author", "album": "Book Title"}
+    track_paths: list[Path] = []
+    for disc_name, tracks in (
+        ("Disc 1", ("01.mp3", "02.mp3")),
+        ("Disc 2", ("01.mp3", "02.mp3")),
+    ):
+        disc = book / disc_name
+        disc.mkdir()
+        for name in tracks:
+            path = make_tagged_mp3(name=name, **tags)
+            path.rename(disc / name)
+            track_paths.append(disc / name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result, _ = organize(book, library, move=True)
+
+    dest_dir = library / "Jane Author" / "Book Title"
+    assert result.copied_files == (
+        "Disc 1/01.mp3",
+        "Disc 1/02.mp3",
+        "Disc 2/01.mp3",
+        "Disc 2/02.mp3",
+    )
+    for rel in result.copied_files:
+        assert (dest_dir / rel).is_file()
+    for path in track_paths:
+        assert not path.is_file()
+
+
+def test_organize_move_collision_aborts_without_replace(tmp_path, make_tagged_mp3):
+    source = make_tagged_mp3(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    organize_file(source, library)
+    dest_file = library / "Jane Author" / "Book Title" / "book.mp3"
+    assert dest_file.is_file()
+
+    with pytest.raises(ValidationError, match="already exists"):
+        organize_file(source, library, move=True)
+
+    assert source.is_file()
+    assert dest_file.is_file()
+
+
+def test_organize_move_with_replace(tmp_path, make_tagged_mp3):
+    source = make_tagged_mp3(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+    dest_dir = library / "Jane Author" / "Book Title"
+    dest_dir.mkdir(parents=True)
+    stale = dest_dir / "old.mp3"
+    stale.write_bytes(b"stale")
+
+    result = organize_file(source, library, move=True, replace=True)
+
+    assert result.copied_files == ("book.mp3",)
+    assert not stale.exists()
+    assert (dest_dir / "book.mp3").is_file()
+    assert not source.is_file()
+
+
+def test_organize_move_sidecar_and_cover(tmp_path, make_tagged_mp3, minimal_jpeg):
+    book = tmp_path / "download"
+    book.mkdir()
+    track = make_tagged_mp3(albumartist="Jane Author", album="Book Title")
+    track_path = book / track.name
+    track.rename(track_path)
+    cover_path = book / "cover.jpg"
+    cover_path.write_bytes(minimal_jpeg)
+    desc_path = book / "desc.txt"
+    desc_path.write_text("A great book.", encoding="utf-8")
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result = organize_file(book, library, move=True)
+
+    assert not track_path.is_file()
+    assert not cover_path.is_file()
+    assert not desc_path.is_file()
+    assert (result.dest_dir / "Cover.jpg").is_file()
+    assert (result.dest_dir / "desc.txt").read_text(encoding="utf-8") == "A great book."
+    assert "Cover.jpg" in result.copied_files
+    assert "desc.txt" in result.copied_files
+
+
+def test_cli_move_success(tmp_path, make_tagged_mp3, capsys):
+    from abs_organize.cli import main
+
+    source = make_tagged_mp3(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(source), "--library", str(library), "--move"])
+
+    assert exc.value.code == 0
+    captured = capsys.readouterr()
+    assert "Moved:" in captured.out
+    assert not source.is_file()
+    assert (
+        library / "Jane Author" / "Book Title" / "book.mp3"
+    ).is_file()
+
+
 def test_organize_sidecar_cover_copied_as_cover_jpg(
     tmp_path, make_tagged_mp3, minimal_jpeg
 ):

@@ -117,7 +117,7 @@ def _write_jpeg_bytes(dest: Path, data: bytes, *, mime: str | None) -> None:
     image.save(dest, format="JPEG", quality=90)
 
 
-def write_cover_jpg(dest_dir: Path, source: CoverSource) -> str:
+def write_cover_jpg(dest_dir: Path, source: CoverSource, *, move: bool = False) -> str:
     """Write ``Cover.jpg`` under *dest_dir*. Returns relative filename."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / COVER_FILENAME
@@ -125,12 +125,17 @@ def write_cover_jpg(dest_dir: Path, source: CoverSource) -> str:
     if source.sidecar_path is not None:
         sidecar = source.sidecar_path
         if sidecar.suffix.lower() in _JPEG_EXTENSIONS:
-            shutil.copy2(sidecar, dest)
+            if move:
+                shutil.move(sidecar, dest)
+            else:
+                shutil.copy2(sidecar, dest)
         else:
             image = Image.open(sidecar)
             if image.mode not in ("RGB", "L"):
                 image = image.convert("RGB")
             image.save(dest, format="JPEG", quality=90)
+            if move:
+                sidecar.unlink()
     elif source.image_data is not None:
         _write_jpeg_bytes(dest, source.image_data, mime=source.mime)
     else:

@@ -1,6 +1,6 @@
 # abs-organize
 
-A Python CLI that copies a tagged audiobook file into an [Audiobookshelf](https://www.audiobookshelf.org/) library layout (`{library}/{Author}/[{Series}/]{TitleFolder}/`).
+A Python CLI that copies or moves a tagged audiobook file into an [Audiobookshelf](https://www.audiobookshelf.org/) library layout (`{library}/{Author}/[{Series}/]{TitleFolder}/`). Copy is the default.
 
 ## Install
 
@@ -17,14 +17,15 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
-abs-organize INPUT [--profile NAME] [--library PATH] [--dry-run] [--replace] [--allow-guess] [--json] [-v|--verbose]
+abs-organize INPUT [--profile NAME] [--library PATH] [--dry-run] [--move] [--replace] [--allow-guess] [--json] [-v|--verbose]
 ```
 
 - **INPUT** — path to a single audio file or a directory of tracks (`.mp3`, `.m4b`, `.m4a`, `.flac`, `.ogg`)
 - **--profile** — named library profile from config (uses `default` when omitted)
 - **--library** — library root for this run only (overrides config and env)
-- **--dry-run** — print library root, destination, and planned copies; make no changes
-- **--replace** — delete the entire existing destination title folder, then copy (destructive; use when re-organizing)
+- **--dry-run** — print library root, destination, and planned operations; make no changes
+- **--move** — relocate files from the input path into the library (same layout as copy; sources removed after success)
+- **--replace** — delete the entire existing destination title folder, then organize (destructive; use when re-organizing)
 - **--allow-guess** — when author/title tags are missing, guess them from the book folder or file name (low confidence; see below)
 - **--json** — on success, print minimal JSON to stdout (for scripting); errors stay on stderr as plain text
 - **-v / --verbose** — log path segment sanitization details to stderr
@@ -43,12 +44,15 @@ abs-organize ~/Downloads/book.m4b --library ~/Audiobooks
 
 ### Preview first
 
-Use `--dry-run` to verify naming before writing. It runs the same metadata validation as a real organize and prints warnings to stderr, but does not create directories or copy files under the library. Omit the flag to apply (copy) into the library.
+Use `--dry-run` to verify naming before writing. It runs the same metadata validation as a real organize and prints warnings to stderr, but does not create directories or transfer files under the library. Omit the flag to apply (copy by default) into the library.
 
 ```bash
 abs-organize ~/Downloads/inbox/SomeBook --dry-run --library ~/Audiobooks
 abs-organize ~/Downloads/inbox/SomeBook --library ~/Audiobooks
+abs-organize ~/Downloads/inbox/SomeBook --library ~/Audiobooks --move
 ```
+
+On the same filesystem, `--move` uses a rename when possible. Across devices, Python falls back to copy-then-delete on the source (same end state: files in the library, sources removed).
 
 Metadata is read from embedded tags (Mutagen). Author comes from `albumartist` or `artist`; title from `album` or `title`. Optional tags drive ABS-style folders: `grouping` (series), `date` (year), `composer` (narrator), and on `.m4b`/`.m4a` iTunes movement atoms when present.
 
@@ -76,7 +80,7 @@ abs-organize ~/Downloads/inbox/"Jane Author - Great Book" --library ~/Audiobooks
 {library}/Terry Goodkind/Sword of Truth/Vol 1 - 1994 - Wizards First Rule {Sam Tsoutsouvas}/book.m4b
 ```
 
-The file is **copied** (not moved), keeping its original basename.
+By default the file is **copied**, keeping its original basename in the inbox. Use **`--move`** to remove sources after a successful organize.
 
 ## Configuration
 
@@ -113,7 +117,7 @@ Set `ABS_ORGANIZE_LIBRARY` to override the default profile path without editing 
 |------|---------|
 | 0 | Success |
 | 1 | User or metadata error (missing tags, invalid paths, config/profile errors) |
-| 2 | I/O error (copy or filesystem failure) |
+| 2 | I/O error (copy, move, or filesystem failure) |
 
 ## JSON output
 
@@ -141,4 +145,4 @@ pytest
 
 ## Roadmap
 
-Covers and move are planned in later issues.
+Batch inbox processing and additional features are tracked in the project issues.

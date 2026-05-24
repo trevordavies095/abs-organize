@@ -28,8 +28,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="abs-organize",
         description=(
-            "Copy a tagged audiobook file or track folder into an Audiobookshelf "
-            "library layout ({library}/{Author}/[{Series}/]{TitleFolder}/)."
+            "Copy or move a tagged audiobook file or track folder into an "
+            "Audiobookshelf library layout "
+            "({library}/{Author}/[{Series}/]{TitleFolder}/). Copy is the default."
         ),
     )
     parser.add_argument(
@@ -90,10 +91,18 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--move",
+        action="store_true",
+        help=(
+            "move files from the input path into the library instead of copying "
+            "(same layout as copy; inbox sources are removed after success)"
+        ),
+    )
+    parser.add_argument(
         "--replace",
         action="store_true",
         help=(
-            "delete the entire existing destination title folder, then copy "
+            "delete the entire existing destination title folder, then organize "
             "(destructive; requires an explicit choice when the destination exists)"
         ),
     )
@@ -149,6 +158,7 @@ def _print_result(
     *,
     library: Path,
     dry_run: bool = False,
+    move: bool = False,
 ) -> None:
     print(f"Library: {library}")
     print(f"Source: {result.source}")
@@ -159,7 +169,8 @@ def _print_result(
         for name in result.copied_files:
             print(f"  {name} → {dest_relative / name}")
     else:
-        print("Copied:")
+        label = "Moved:" if move else "Copied:"
+        print(label)
         for name in result.copied_files:
             print(f"  {name}")
 
@@ -183,6 +194,7 @@ def main(argv: list[str] | None = None) -> None:
             overrides=_metadata_overrides_from_args(args),
             include_subtitle_in_folder=_load_include_subtitle_in_folder(),
             dry_run=args.dry_run,
+            move=args.move,
             replace=args.replace,
             allow_guess=args.allow_guess,
             on_log=on_log,
@@ -205,7 +217,9 @@ def main(argv: list[str] | None = None) -> None:
     else:
         for warning in warnings:
             print(warning, file=sys.stderr)
-        _print_result(result, library=library, dry_run=args.dry_run)
+        _print_result(
+            result, library=library, dry_run=args.dry_run, move=args.move
+        )
     raise SystemExit(0)
 
 
