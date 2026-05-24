@@ -8,10 +8,37 @@ version = "0.1.0"
 description = "Organize downloaded audiobooks into Audiobookshelf library layout"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Trevor Davies", email = "me@trevordavies095.com" },
+]
+maintainers = [
+    { name = "Trevor Davies", email = "me@trevordavies095.com" },
+]
+keywords = ["audiobooks", "audiobookshelf", "cli", "metadata", "library"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Utilities",
+]
 dependencies = [
     "mutagen>=1.47",
     "Pillow>=10",
 ]
+
+[project.urls]
+Homepage = "https://github.com/trevordavies095/abs-organize"
+Repository = "https://github.com/trevordavies095/abs-organize"
+Issues = "https://github.com/trevordavies095/abs-organize/issues"
+Documentation = "https://github.com/trevordavies095/abs-organize#readme"
 
 [project.optional-dependencies]
 dev = [

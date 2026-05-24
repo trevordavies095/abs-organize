@@ -21,6 +21,14 @@ abs-organize ~/Downloads/inbox/MyBook.m4b
 
 ## Install
 
+From PyPI:
+
+```bash
+pip install abs-organize
+```
+
+From a clone:
+
 ```bash
 pip install -e .
 ```
@@ -172,6 +180,8 @@ Batch: `0` only if every book succeeded; partial failure uses `1` or `2` if any 
 ## Development
 
 Release policy: see [`docs/RELEASE.md`](docs/RELEASE.md).
+
+**CI:** GitHub Actions runs `pytest` on every push and pull request (`.github/workflows/ci.yml`). Require the **CI** status check to pass before merging to `main` (**Settings → Branches → Branch protection rules**).
 
 | Path | Role |
 |------|------|

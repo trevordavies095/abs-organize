@@ -6,7 +6,7 @@ Human decisions and publishing setup for `abs-organize` on PyPI. Application pac
 
 **MIT** (SPDX identifier: `MIT`).
 
-The `LICENSE` file and `pyproject.toml` license metadata are added in issue #21.
+The `LICENSE` file (MIT) and `pyproject.toml` `license` / `license-files` metadata declare this choice for PyPI.
 
 ## Versioning
 
@@ -69,10 +69,12 @@ After saving, confirm each account lists the pending publisher. The project is c
 
 ## Local verification (before first publish)
 
-After #21 lands:
+Run from the repository root after packaging metadata changes:
 
 ```bash
 pip install build twine
 python -m build
 twine check dist/*
 ```
+
+Expect `python -m build` to produce `dist/abs-organize-0.1.0.tar.gz` and `dist/abs_organize-0.1.0-py3-none-any.whl`. `twine check` should report both artifacts as valid with no errors.
