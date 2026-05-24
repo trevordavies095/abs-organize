@@ -1,11 +1,11 @@
-"""Integration tests for single-file organize."""
+"""Integration tests for organize (single file and multi-track folder)."""
 
 from __future__ import annotations
 
 import pytest
 
 from abs_organize.metadata import MetadataError, ValidationError
-from abs_organize.organize import organize_file
+from abs_organize.organize import organize, organize_file
 
 
 def test_organize_mp3_with_albumartist_and_album(tmp_path, make_tagged_mp3):
@@ -100,3 +100,104 @@ def test_cli_missing_metadata_exits_1(make_tagged_mp3, tmp_path, capsys):
 
     assert exc.value.code == 1
     assert "Missing required metadata" in capsys.readouterr().err
+
+
+def test_organize_multi_track_folder(tmp_path, make_tagged_mp3):
+    tracks_dir = tmp_path / "tracks"
+    tracks_dir.mkdir()
+    tags = {"albumartist": "Jane Author", "album": "Book Title"}
+    for i in range(1, 4):
+        name = f"{i:02d}.mp3"
+        path = make_tagged_mp3(name=name, **tags)
+        path.rename(tracks_dir / name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result, warnings = organize(tracks_dir, library)
+
+    dest_dir = library / "Jane Author" / "Book Title"
+    assert result.dest_dir == dest_dir
+    assert result.copied_files == ("01.mp3", "02.mp3", "03.mp3")
+    assert warnings == ()
+    for name in ("01.mp3", "02.mp3", "03.mp3"):
+        assert (dest_dir / name).is_file()
+        assert (tracks_dir / name).is_file()
+
+
+def test_organize_multi_track_tag_conflict_warns(tmp_path, make_tagged_mp3):
+    tracks_dir = tmp_path / "tracks"
+    tracks_dir.mkdir()
+    for name, album in (
+        ("01.mp3", "Book One"),
+        ("02.mp3", "Book One"),
+        ("03.mp3", "Book Two"),
+    ):
+        path = make_tagged_mp3(
+            name=name, albumartist="Jane Author", album=album
+        )
+        path.rename(tracks_dir / name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result, warnings = organize(tracks_dir, library)
+
+    assert result.dest_dir == library / "Jane Author" / "Book One"
+    assert any("title tag conflict" in w for w in warnings)
+    assert (result.dest_dir / "01.mp3").is_file()
+    assert (result.dest_dir / "03.mp3").is_file()
+
+
+def test_organize_no_majority_title_copies_nothing(tmp_path, make_tagged_mp3):
+    tracks_dir = tmp_path / "tracks"
+    tracks_dir.mkdir()
+    for name, album in (("01.mp3", "Alpha"), ("02.mp3", "Beta")):
+        path = make_tagged_mp3(
+            name=name, albumartist="Jane Author", album=album
+        )
+        path.rename(tracks_dir / name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(MetadataError, match="No majority for required field 'title'"):
+        organize(tracks_dir, library)
+
+    assert not (library / "Jane Author").exists()
+
+
+def test_organize_cli_overrides_fix_bad_rip(
+    tmp_path, make_tagged_mp3, capsys
+):
+    from abs_organize.cli import main
+
+    tracks_dir = tmp_path / "tracks"
+    tracks_dir.mkdir()
+    for name, album in (("01.mp3", "One"), ("02.mp3", "Two")):
+        path = make_tagged_mp3(name=name, albumartist="Bad", album=album)
+        path.rename(tracks_dir / name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                str(tracks_dir),
+                "--library",
+                str(library),
+                "--author",
+                "Good Author",
+                "--title",
+                "Good Title",
+            ]
+        )
+
+    assert exc.value.code == 0
+    dest = library / "Good Author" / "Good Title"
+    assert (dest / "01.mp3").is_file()
+    assert (dest / "02.mp3").is_file()
+    err = capsys.readouterr().err
+    assert "author tag conflict" not in err
+    assert "title tag conflict" not in err

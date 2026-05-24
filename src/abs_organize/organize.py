@@ -1,4 +1,4 @@
-"""Copy a single tagged audio file into the library layout."""
+"""Copy tagged audio into the library layout."""
 
 from __future__ import annotations
 
@@ -7,11 +7,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from abs_organize.discovery import find_track_files, list_sidecars
 from abs_organize.metadata import (
+    BookMetadata,
     MetadataError,
+    MetadataOverrides,
     SUPPORTED_EXTENSIONS,
     ValidationError,
-    read_book_metadata,
+    resolve_book_metadata,
 )
 from abs_organize.naming import book_destination_segments
 
@@ -27,16 +30,17 @@ class OrganizeResult:
     copied_files: tuple[str, ...]
 
 
-def _validate_input(path: Path) -> None:
+def _validate_input_path(path: Path) -> None:
     if not path.exists():
         raise ValidationError(f"Input does not exist: {path}")
-    if not path.is_file():
-        raise ValidationError(f"Input must be a file: {path}")
-    if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-        supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
-        raise ValidationError(
-            f"Unsupported file type {path.suffix!r}; supported: {supported}"
-        )
+    if path.is_file():
+        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
+            raise ValidationError(
+                f"Unsupported file type {path.suffix!r}; supported: {supported}"
+            )
+    elif not path.is_dir():
+        raise ValidationError(f"Input must be a file or directory: {path}")
 
 
 def _validate_library(library: Path) -> None:
@@ -46,24 +50,13 @@ def _validate_library(library: Path) -> None:
         raise ValidationError(f"Library path must be a directory: {library}")
 
 
-def organize_file(
-    input_path: Path,
+def _build_dest_dir(
+    metadata: BookMetadata,
     library_path: Path,
     *,
     include_subtitle_in_folder: bool = False,
     on_log: Callable[[str], None] | None = None,
-) -> OrganizeResult:
-    input_path = input_path.resolve()
-    library_path = library_path.resolve()
-
-    _validate_input(input_path)
-    _validate_library(library_path)
-
-    try:
-        metadata = read_book_metadata(input_path)
-    except MetadataError:
-        raise
-
+) -> Path:
     author_seg, series_seg, title_seg = book_destination_segments(
         metadata,
         include_subtitle_in_folder=include_subtitle_in_folder,
@@ -73,16 +66,82 @@ def organize_file(
     if series_seg:
         dest_dir /= series_seg
     dest_dir /= title_seg
-    dest_file = dest_dir / input_path.name
+    return dest_dir
 
+
+def _copy_files(sources: list[Path], dest_dir: Path) -> tuple[str, ...]:
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(input_path, dest_file)
     except OSError as exc:
-        raise OrganizeIOError(f"Failed to copy {input_path.name}: {exc}") from exc
+        raise OrganizeIOError(f"Failed to create destination directory: {exc}") from exc
 
-    return OrganizeResult(
-        source=input_path,
-        dest_dir=dest_dir,
-        copied_files=(input_path.name,),
+    copied: list[str] = []
+    for source in sources:
+        dest_file = dest_dir / source.name
+        try:
+            shutil.copy2(source, dest_file)
+        except OSError as exc:
+            raise OrganizeIOError(f"Failed to copy {source.name}: {exc}") from exc
+        copied.append(source.name)
+    return tuple(copied)
+
+
+def organize(
+    input_path: Path,
+    library_path: Path,
+    *,
+    overrides: MetadataOverrides | None = None,
+    include_subtitle_in_folder: bool = False,
+    on_log: Callable[[str], None] | None = None,
+) -> tuple[OrganizeResult, tuple[str, ...]]:
+    input_path = input_path.resolve()
+    library_path = library_path.resolve()
+
+    _validate_input_path(input_path)
+    _validate_library(library_path)
+
+    if input_path.is_file():
+        track_files = [input_path]
+    else:
+        track_files = find_track_files(input_path)
+        if on_log is not None:
+            for sidecar in list_sidecars(input_path):
+                on_log(f"Sidecar found (not copied): {sidecar.name}")
+
+    try:
+        resolved = resolve_book_metadata(track_files, overrides=overrides)
+    except MetadataError:
+        raise
+
+    dest_dir = _build_dest_dir(
+        resolved.metadata,
+        library_path,
+        include_subtitle_in_folder=include_subtitle_in_folder,
+        on_log=on_log,
     )
+    copied_files = _copy_files(track_files, dest_dir)
+
+    return (
+        OrganizeResult(
+            source=input_path,
+            dest_dir=dest_dir,
+            copied_files=copied_files,
+        ),
+        resolved.warnings,
+    )
+
+
+def organize_file(
+    input_path: Path,
+    library_path: Path,
+    *,
+    include_subtitle_in_folder: bool = False,
+    on_log: Callable[[str], None] | None = None,
+) -> OrganizeResult:
+    result, _warnings = organize(
+        input_path,
+        library_path,
+        include_subtitle_in_folder=include_subtitle_in_folder,
+        on_log=on_log,
+    )
+    return result

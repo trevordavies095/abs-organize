@@ -1,14 +1,22 @@
-"""Read audio metadata and resolve fields for ABS naming."""
+"""Read audio metadata and resolve fields for ABS naming.
+
+Majority vote rules:
+- Required fields (author, title): strict majority (count > n/2) or MetadataError.
+- Optional fields: highest count among non-empty values; lexicographic tie-break.
+"""
 
 from __future__ import annotations
 
 import re
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from mutagen import File as MutagenFile
 
-SUPPORTED_EXTENSIONS = {".mp3", ".m4b", ".m4a"}
+SUPPORTED_EXTENSIONS = {".mp3", ".m4b", ".m4a", ".flac", ".ogg"}
 
 AUTHOR_KEYS = ("albumartist", "artist")
 TITLE_KEYS = ("album", "title")
@@ -40,6 +48,22 @@ class BookMetadata:
     year: int | None = None
     narrator: str | None = None
     subtitle: str | None = None
+
+
+@dataclass(frozen=True)
+class MetadataOverrides:
+    author: str | None = None
+    title: str | None = None
+    year: int | None = None
+    series: str | None = None
+    sequence: int | float | None = None
+    narrator: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedMetadata:
+    metadata: BookMetadata
+    warnings: tuple[str, ...]
 
 
 def _tag_value(tags: object, key: str) -> str | None:
@@ -199,3 +223,141 @@ def read_book_metadata(path: Path) -> BookMetadata:
     if updates:
         return replace(metadata, **updates)
     return metadata
+
+
+def _strict_majority_winner(
+    values: list[str], field_name: str
+) -> str:
+    if not values:
+        raise MetadataError(
+            f"No majority for required field {field_name!r} across audio files."
+        )
+    counts = Counter(values)
+    top_count = max(counts.values())
+    winners = sorted(v for v, c in counts.items() if c == top_count)
+    if top_count <= len(values) / 2:
+        raise MetadataError(
+            f"No majority for required field {field_name!r} across audio files "
+            f"({len(winners)} tied at {top_count}/{len(values)})."
+        )
+    return winners[0]
+
+
+def _optional_majority_winner(values: list[Any]) -> Any | None:
+    if not values:
+        return None
+    counts = Counter(values)
+    top_count = max(counts.values())
+    winners = sorted(v for v, c in counts.items() if c == top_count)
+    return winners[0]
+
+
+def _format_conflict_value(value: Any) -> str:
+    return repr(value)
+
+
+def _vote_field(
+    per_file: list[BookMetadata],
+    *,
+    field_name: str,
+    getter: Callable[[BookMetadata], Any],
+    required: bool,
+) -> tuple[Any, str | None]:
+    values = [getter(m) for m in per_file]
+    non_empty = [v for v in values if v is not None and v != ""]
+    if not non_empty:
+        if required:
+            raise MetadataError(
+                f"No majority for required field {field_name!r} across audio files."
+            )
+        return None, None
+
+    if required:
+        str_values = [str(v) for v in non_empty]
+        winner = _strict_majority_winner(str_values, field_name)
+        warning = None
+        distinct = set(str_values)
+        if len(distinct) > 1:
+            parts = ", ".join(
+                f"{_format_conflict_value(v)} ({str_values.count(v)})"
+                for v in sorted(distinct)
+            )
+            warning = (
+                f"{field_name} tag conflict: {parts} — using {_format_conflict_value(winner)}"
+            )
+        return winner, warning
+
+    winner = _optional_majority_winner(non_empty)
+    warning = None
+    distinct = set(non_empty)
+    if len(distinct) > 1:
+        str_distinct = sorted(distinct, key=lambda v: str(v))
+        parts = ", ".join(
+            f"{_format_conflict_value(v)} ({non_empty.count(v)})" for v in str_distinct
+        )
+        warning = (
+            f"{field_name} tag conflict: {parts} — using {_format_conflict_value(winner)}"
+        )
+    return winner, warning
+
+
+def resolve_majority(
+    per_file: list[BookMetadata],
+    *,
+    overrides: MetadataOverrides | None = None,
+) -> ResolvedMetadata:
+    if not per_file:
+        raise MetadataError("No audio files to resolve metadata from.")
+
+    overrides = overrides or MetadataOverrides()
+    warnings: list[str] = []
+    fields: dict[str, Any] = {}
+
+    field_specs: list[tuple[str, Callable[[BookMetadata], Any], bool]] = [
+        ("author", lambda m: m.author, True),
+        ("title", lambda m: m.title, True),
+        ("series", lambda m: m.series, False),
+        ("year", lambda m: m.year, False),
+        ("narrator", lambda m: m.narrator, False),
+        ("sequence", lambda m: m.sequence, False),
+        ("subtitle", lambda m: m.subtitle, False),
+    ]
+    override_fields = {
+        "author": overrides.author,
+        "title": overrides.title,
+        "year": overrides.year,
+        "series": overrides.series,
+        "sequence": overrides.sequence,
+        "narrator": overrides.narrator,
+    }
+
+    for field_name, getter, required in field_specs:
+        if field_name in override_fields and override_fields[field_name] is not None:
+            fields[field_name] = override_fields[field_name]
+            continue
+        value, warning = _vote_field(
+            per_file, field_name=field_name, getter=getter, required=required
+        )
+        fields[field_name] = value
+        if warning:
+            warnings.append(warning)
+
+    metadata = BookMetadata(
+        author=fields["author"],
+        title=fields["title"],
+        series=fields["series"],
+        year=fields["year"],
+        narrator=fields["narrator"],
+        sequence=fields["sequence"],
+        subtitle=fields["subtitle"],
+    )
+    return ResolvedMetadata(metadata=metadata, warnings=tuple(warnings))
+
+
+def resolve_book_metadata(
+    paths: list[Path],
+    *,
+    overrides: MetadataOverrides | None = None,
+) -> ResolvedMetadata:
+    per_file = [read_book_metadata(path) for path in paths]
+    return resolve_majority(per_file, overrides=overrides)
