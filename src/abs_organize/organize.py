@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from abs_organize.discovery import (
-    collect_track_files,
+    BookAudio,
+    collect_book_audio,
     discover_book_root,
     list_sidecars,
 )
@@ -73,24 +74,32 @@ def _build_dest_dir(
     return dest_dir
 
 
-def _planned_filenames(sources: list[Path]) -> tuple[str, ...]:
-    return tuple(source.name for source in sources)
+def _planned_filenames(audio: list[BookAudio]) -> tuple[str, ...]:
+    return tuple(item.dest_relative.as_posix() for item in audio)
 
 
-def _copy_files(sources: list[Path], dest_dir: Path) -> tuple[str, ...]:
+def _copy_files(audio: list[BookAudio], dest_dir: Path) -> tuple[str, ...]:
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise OrganizeIOError(f"Failed to create destination directory: {exc}") from exc
 
     copied: list[str] = []
-    for source in sources:
-        dest_file = dest_dir / source.name
+    for item in audio:
+        dest_file = dest_dir / item.dest_relative
         try:
-            shutil.copy2(source, dest_file)
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            raise OrganizeIOError(f"Failed to copy {source.name}: {exc}") from exc
-        copied.append(source.name)
+            raise OrganizeIOError(
+                f"Failed to create directory for {item.dest_relative}: {exc}"
+            ) from exc
+        try:
+            shutil.copy2(item.source, dest_file)
+        except OSError as exc:
+            raise OrganizeIOError(
+                f"Failed to copy {item.dest_relative.as_posix()}: {exc}"
+            ) from exc
+        copied.append(item.dest_relative.as_posix())
     return tuple(copied)
 
 
@@ -110,14 +119,15 @@ def organize(
     _validate_library(library_path)
 
     if input_path.is_file():
-        track_files = [input_path]
+        book_audio = collect_book_audio(input_path)
     else:
         book_root = discover_book_root(input_path)
-        track_files = collect_track_files(book_root)
+        book_audio = collect_book_audio(book_root)
         if on_log is not None:
             for sidecar in list_sidecars(book_root):
                 on_log(f"Sidecar found (not copied): {sidecar.name}")
 
+    track_files = [item.source for item in book_audio]
     try:
         resolved = resolve_book_metadata(track_files, overrides=overrides)
     except MetadataError:
@@ -130,9 +140,9 @@ def organize(
         on_log=on_log,
     )
     if dry_run:
-        copied_files = _planned_filenames(track_files)
+        copied_files = _planned_filenames(book_audio)
     else:
-        copied_files = _copy_files(track_files, dest_dir)
+        copied_files = _copy_files(book_audio, dest_dir)
 
     return (
         OrganizeResult(

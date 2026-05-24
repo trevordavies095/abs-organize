@@ -102,6 +102,60 @@ def test_cli_missing_metadata_exits_1(make_tagged_mp3, tmp_path, capsys):
     assert "Missing required metadata" in capsys.readouterr().err
 
 
+def test_organize_multi_disc_folder(tmp_path, make_tagged_mp3):
+    book = tmp_path / "BookName"
+    book.mkdir()
+    tags = {"albumartist": "Jane Author", "album": "Book Title"}
+    for disc_name, tracks in (
+        ("Disc 1", ("01.mp3", "02.mp3")),
+        ("Disc 2", ("01.mp3", "02.mp3")),
+    ):
+        disc = book / disc_name
+        disc.mkdir()
+        for name in tracks:
+            path = make_tagged_mp3(name=name, **tags)
+            path.rename(disc / name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result, warnings = organize(book, library)
+
+    dest_dir = library / "Jane Author" / "Book Title"
+    assert result.dest_dir == dest_dir
+    assert result.copied_files == (
+        "Disc 1/01.mp3",
+        "Disc 1/02.mp3",
+        "Disc 2/01.mp3",
+        "Disc 2/02.mp3",
+    )
+    assert warnings == ()
+    for rel in result.copied_files:
+        assert (dest_dir / rel).is_file()
+        assert (book / rel).is_file()
+
+
+def test_organize_multi_disc_preserves_source_folder_spelling(tmp_path, make_tagged_mp3):
+    book = tmp_path / "BookName"
+    book.mkdir()
+    tags = {"albumartist": "Jane Author", "album": "Book Title"}
+    for disc_name in ("disc 1", "CD 2"):
+        disc = book / disc_name
+        disc.mkdir()
+        path = make_tagged_mp3(name="01.mp3", **tags)
+        path.rename(disc / path.name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result, _ = organize(book, library)
+
+    dest_dir = library / "Jane Author" / "Book Title"
+    assert (dest_dir / "disc 1" / "01.mp3").is_file()
+    assert (dest_dir / "CD 2" / "01.mp3").is_file()
+    assert result.copied_files == ("disc 1/01.mp3", "CD 2/01.mp3")
+
+
 def test_organize_multi_track_folder(tmp_path, make_tagged_mp3):
     tracks_dir = tmp_path / "tracks"
     tracks_dir.mkdir()

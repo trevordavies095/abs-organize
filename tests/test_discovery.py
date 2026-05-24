@@ -5,8 +5,10 @@ from __future__ import annotations
 import pytest
 
 from abs_organize.discovery import (
+    collect_book_audio,
     collect_track_files,
     discover_book_root,
+    is_disc_folder_name,
 )
 from abs_organize.metadata import ValidationError
 
@@ -132,3 +134,91 @@ def test_discover_book_root_no_audio(tmp_path):
 
     with pytest.raises(ValidationError, match="No audio files found"):
         discover_book_root(empty)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Disc 1",
+        "disc 1",
+        "Disc1",
+        "CD 2",
+        "cd2",
+        "DISK 004",
+        "Disk  3",
+    ],
+)
+def test_is_disc_folder_name_positive(name: str) -> None:
+    assert is_disc_folder_name(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "tracks",
+        "bookA",
+        "Disc",
+        "Disc A",
+        "Disc A 1",
+        "Volume 1",
+    ],
+)
+def test_is_disc_folder_name_negative(name: str) -> None:
+    assert not is_disc_folder_name(name)
+
+
+def test_discover_book_root_multi_disc(tmp_path, make_tagged_mp3):
+    book = tmp_path / "BookName"
+    book.mkdir()
+    tags = {"albumartist": "Jane Author", "album": "Book Title"}
+    for disc_name, tracks in (("Disc 1", ("01.mp3", "02.mp3")), ("Disc 2", ("01.mp3",))):
+        disc = book / disc_name
+        disc.mkdir()
+        for name in tracks:
+            path = make_tagged_mp3(name=name, **tags)
+            path.rename(disc / name)
+
+    assert discover_book_root(book) == book.resolve()
+
+
+def test_collect_book_audio_multi_disc_paths_and_order(tmp_path, make_tagged_mp3):
+    book = tmp_path / "BookName"
+    book.mkdir()
+    tags = {"albumartist": "Jane Author", "album": "Book Title"}
+    for disc_name, tracks in (("Disc 2", ("01.mp3",)), ("Disc 1", ("01.mp3", "02.mp3"))):
+        disc = book / disc_name
+        disc.mkdir()
+        for name in tracks:
+            path = make_tagged_mp3(name=name, **tags)
+            path.rename(disc / name)
+
+    audio = collect_book_audio(book)
+
+    assert [a.dest_relative.as_posix() for a in audio] == [
+        "Disc 1/01.mp3",
+        "Disc 1/02.mp3",
+        "Disc 2/01.mp3",
+    ]
+    assert collect_track_files(book) == [a.source for a in audio]
+
+
+def test_discover_book_root_wrapper_with_multi_disc(tmp_path, make_tagged_mp3):
+    book = tmp_path / "BookName"
+    for disc_name in ("Disc 1", "Disc 2"):
+        disc = book / disc_name
+        disc.mkdir(parents=True)
+        path = make_tagged_mp3(
+            name="01.mp3", albumartist="Jane Author", album="Book Title"
+        )
+        path.rename(disc / path.name)
+
+    wrapper = tmp_path / "wrapper"
+    wrapper.mkdir()
+    book.rename(wrapper / book.name)
+
+    assert discover_book_root(wrapper) == (wrapper / "BookName").resolve()
+    audio = collect_book_audio(wrapper / "BookName")
+    assert [a.dest_relative.as_posix() for a in audio] == [
+        "Disc 1/01.mp3",
+        "Disc 2/01.mp3",
+    ]
