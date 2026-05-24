@@ -105,3 +105,29 @@ abs-organize --help
 ```
 
 Replace `0.1.0` with the version you published.
+
+## Production PyPI release
+
+Same workflow ([`.github/workflows/release.yml`](../.github/workflows/release.yml)), **`pypi`** GitHub environment, default PyPI upload URL.
+
+### Normal release path
+
+Push tag `v{version}` after bumping `pyproject.toml` — both TestPyPI and production PyPI publish jobs run.
+
+### Manual dispatch
+
+Actions → **Release** → **Run workflow**. Options:
+
+| Input | Default | Purpose |
+|-------|---------|---------|
+| `publish_testpypi` | `true` | Upload to TestPyPI |
+| `publish_pypi` | `false` | Upload to production PyPI |
+
+Use `publish_pypi=true` and `publish_testpypi=false` when TestPyPI already has the version (e.g. first production publish of `0.1.0` after TestPyPI verification).
+
+### Install verification
+
+```bash
+pip install abs-organize==0.1.0
+abs-organize --help
+```

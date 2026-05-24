@@ -5,14 +5,20 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      publish_testpypi:
+        description: Publish to TestPyPI
+        type: boolean
+        default: true
+      publish_pypi:
+        description: Publish to production PyPI
+        type: boolean
+        default: false
 
 jobs:
-  publish-testpypi:
-    name: Publish to TestPyPI
+  build:
+    name: Build distributions
     runs-on: ubuntu-latest
-    environment: testpypi
-    permissions:
-      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -40,7 +46,46 @@ jobs:
       - name: Check distributions
         run: twine check dist/*
 
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    if: github.event_name == 'push' || inputs.publish_testpypi
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    if: github.event_name == 'push' || inputs.publish_pypi
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

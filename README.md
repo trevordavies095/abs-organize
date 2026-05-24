@@ -9,7 +9,7 @@ CLI to place downloaded audiobooks into an [Audiobookshelf](https://www.audioboo
 ## Quick start
 
 ```bash
-pip install -e ".[dev]"   # editable install + pytest
+pip install abs-organize
 
 # One-off (no config file)
 abs-organize ~/Downloads/book.m4b --library ~/Audiobooks --dry-run
@@ -21,7 +21,7 @@ abs-organize ~/Downloads/inbox/MyBook.m4b
 
 ## Install
 
-From PyPI:
+From PyPI (recommended):
 
 ```bash
 pip install abs-organize
@@ -33,14 +33,7 @@ From a clone:
 pip install -e .
 ```
 
-Development and tests:
-
-```bash
-pip install -e ".[dev]"
-pytest
-```
-
-Run `abs-organize --help` for the full option list.
+For development and tests, see [Development](#development).
 
 ## Usage
 
