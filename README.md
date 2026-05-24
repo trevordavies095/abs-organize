@@ -171,6 +171,8 @@ Batch: `0` only if every book succeeded; partial failure uses `1` or `2` if any 
 
 ## Development
 
+Release policy: see [`docs/RELEASE.md`](docs/RELEASE.md).
+
 | Path | Role |
 |------|------|
 | `src/abs_organize/cli.py` | Argument parsing and entry point |
