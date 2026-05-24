@@ -106,3 +106,20 @@ def test_cli_narrator_override_strips_prefix():
     resolved = resolve_majority(per_file, overrides=overrides)
 
     assert resolved.metadata.narrator == "Joyce Bean"
+
+
+def test_opf_title_suffix_narrator_fills_via_gap_fill(tmp_path, write_opf):
+    from abs_organize.opf import parse_opf
+
+    opf_path = write_opf(
+        tmp_path / "metadata.opf",
+        title="Book Title (read by Sam Tsoutsouvas)",
+    )
+    opf_metadata = parse_opf(opf_path)
+    assert opf_metadata is not None
+
+    resolved = _resolved(narrator=None)
+    filled = apply_gap_fill(resolved, opf_metadata=opf_metadata)
+
+    assert filled.metadata.title == "Book Title"
+    assert filled.metadata.narrator == "Sam Tsoutsouvas"

@@ -1297,6 +1297,30 @@ def test_organize_opf_series_gap_fill_creates_series_folder(
     assert result.dest_dir == dest.parent
 
 
+def test_organize_opf_title_suffix_fills_narrator_in_title_folder(
+    tmp_path, make_tagged_mp3, write_opf
+):
+    book = tmp_path / "download"
+    book.mkdir()
+    track = make_tagged_mp3(
+        albumartist="George R. R. Martin",
+        album="A Game of Thrones",
+        date="1996",
+    )
+    track.rename(book / track.name)
+    write_opf(
+        book / "metadata.opf",
+        title="A Game of Thrones (read by Roy Dotrice)",
+    )
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result = organize_file(book, library)
+
+    assert result.dest_dir.name == "1996 - A Game of Thrones {Roy Dotrice}"
+
+
 def test_organize_reader_txt_fills_narrator_in_title_folder(tmp_path, make_tagged_mp3):
     book = tmp_path / "download"
     book.mkdir()
