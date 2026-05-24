@@ -880,3 +880,22 @@ def test_organize_reader_txt_fills_narrator_in_title_folder(tmp_path, make_tagge
 
     assert result.dest_dir.name == "Book Title {Sam Tsoutsouvas}"
     assert (result.dest_dir / "reader.txt").is_file()
+
+
+def test_organize_strips_narrator_prefix_in_title_folder(tmp_path, make_tagged_mp3):
+    book = tmp_path / "download"
+    book.mkdir()
+    track = make_tagged_mp3(
+        albumartist="Author",
+        album="Beyond Reach",
+        date="2007",
+        composer="Narrated by Joyce Bean",
+    )
+    track.rename(book / track.name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result = organize_file(book, library)
+
+    assert result.dest_dir.name == "2007 - Beyond Reach {Joyce Bean}"

@@ -57,6 +57,16 @@ def test_resolve_optional_fields():
     assert meta.sequence is None
 
 
+def test_resolve_strips_narrator_prefix_from_composer():
+    tags = _FakeTags(
+        albumartist=["Author"],
+        album=["Beyond Reach"],
+        composer=["Narrated by Joyce Bean"],
+    )
+    meta = resolve_metadata(tags)
+    assert meta.narrator == "Joyce Bean"
+
+
 def test_parse_year_from_iso_date():
     assert parse_year("1994-01-01") == 1994
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from abs_organize.metadata import BookMetadata, parse_year
+from abs_organize.metadata import BookMetadata, normalize_narrator, parse_year
 
 _NS = {
     "dc": "http://purl.org/dc/elements/1.1/",
@@ -131,6 +131,8 @@ def parse_opf(path: Path) -> BookMetadata | None:
                 break
     if not narrator:
         narrator = _find_meta(root, "calibre:author_sort_narrator", "narrator")
+    if narrator:
+        narrator = normalize_narrator(narrator) or None
 
     if not any((title, author, series, sequence, year, narrator)):
         return None
@@ -151,4 +153,7 @@ def read_reader_txt(path: Path) -> str | None:
         text = path.read_text(encoding="utf-8").strip()
     except OSError:
         return None
-    return text or None
+    if not text:
+        return None
+    normalized = normalize_narrator(text)
+    return normalized or None

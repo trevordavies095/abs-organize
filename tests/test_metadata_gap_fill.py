@@ -7,6 +7,7 @@ from abs_organize.metadata import (
     MetadataOverrides,
     ResolvedMetadata,
     apply_gap_fill,
+    resolve_majority,
 )
 
 
@@ -73,3 +74,35 @@ def test_reader_txt_does_not_override_existing_narrator():
     filled = apply_gap_fill(resolved, reader_txt="Reader File Narrator")
 
     assert filled.metadata.narrator == "Tag Narrator"
+
+
+def test_reader_txt_strips_narrator_prefix():
+    resolved = _resolved(narrator=None)
+
+    filled = apply_gap_fill(resolved, reader_txt="Read by Sam Tsoutsouvas")
+
+    assert filled.metadata.narrator == "Sam Tsoutsouvas"
+
+
+def test_opf_strips_narrator_prefix():
+    resolved = _resolved(narrator=None)
+    opf = BookMetadata(
+        author="",
+        title="",
+        narrator="Narrated by Joyce Bean",
+    )
+
+    filled = apply_gap_fill(resolved, opf_metadata=opf)
+
+    assert filled.metadata.narrator == "Joyce Bean"
+
+
+def test_cli_narrator_override_strips_prefix():
+    per_file = [
+        BookMetadata(author="Author", title="Book", narrator="Ray Porter"),
+    ]
+    overrides = MetadataOverrides(narrator="Narrated by Joyce Bean")
+
+    resolved = resolve_majority(per_file, overrides=overrides)
+
+    assert resolved.metadata.narrator == "Joyce Bean"

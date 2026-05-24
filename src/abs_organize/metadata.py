@@ -29,6 +29,11 @@ _MP4_MOVEMENT_NAME = "\xa9mvn"
 _MP4_MOVEMENT_INDEX = "\xa9mvi"
 _MP4_COMPOSER = "\xa9wrt"
 _YEAR_PATTERN = re.compile(r"^(\d{4})")
+_NARRATOR_PREFIX = re.compile(
+    r"^(?:narrated\s+by|read\s+by|performed\s+by)(?:\s+|$)",
+    re.IGNORECASE,
+)
+_WHITESPACE = re.compile(r"\s+")
 
 
 class MetadataError(Exception):
@@ -95,6 +100,22 @@ def parse_year(value: str | None) -> int | None:
     if match is None:
         return None
     return int(match.group(1))
+
+
+def normalize_narrator(value: str) -> str:
+    """Strip common narrator prefixes and collapse internal whitespace."""
+    stripped = value.strip()
+    if not stripped:
+        return ""
+    without_prefix = _NARRATOR_PREFIX.sub("", stripped)
+    return _WHITESPACE.sub(" ", without_prefix).strip()
+
+
+def _normalize_narrator_optional(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = normalize_narrator(value)
+    return normalized or None
 
 
 def _mp4_atom_text(tags: object, key: str) -> str | None:
@@ -193,7 +214,7 @@ def resolve_metadata(tags: object, *, lenient: bool = False) -> BookMetadata:
         title=title or "",
         series=_first_tag(tags, SERIES_KEYS),
         year=parse_year(_first_tag(tags, YEAR_KEYS)),
-        narrator=_first_tag(tags, NARRATOR_KEYS),
+        narrator=_normalize_narrator_optional(_first_tag(tags, NARRATOR_KEYS)),
         subtitle=_first_tag(tags, SUBTITLE_KEYS),
     )
 
@@ -217,7 +238,7 @@ def read_book_metadata(path: Path, *, lenient: bool = False) -> BookMetadata:
         if metadata.sequence is None and mp4_sequence is not None:
             updates["sequence"] = mp4_sequence
         if metadata.narrator is None:
-            narrator = _read_mp4_narrator(path)
+            narrator = _normalize_narrator_optional(_read_mp4_narrator(path))
             if narrator:
                 updates["narrator"] = narrator
 
@@ -333,7 +354,7 @@ def resolve_majority(
         "year": overrides.year,
         "series": overrides.series,
         "sequence": overrides.sequence,
-        "narrator": overrides.narrator,
+        "narrator": _normalize_narrator_optional(overrides.narrator),
     }
 
     for field_name, getter, required in field_specs:
@@ -408,12 +429,17 @@ def apply_gap_fill(
                 continue
             incoming = getattr(opf_metadata, field)
             if incoming is not None and incoming != "":
-                updates[field] = incoming
+                if field == "narrator":
+                    incoming = _normalize_narrator_optional(str(incoming))
+                if incoming is not None and incoming != "":
+                    updates[field] = incoming
 
     if reader_txt and override_map.get("narrator") is None:
         narrator = updates.get("narrator", current.narrator)
         if narrator is None or narrator == "":
-            updates["narrator"] = reader_txt
+            normalized = _normalize_narrator_optional(reader_txt)
+            if normalized:
+                updates["narrator"] = normalized
 
     if not updates:
         return resolved
