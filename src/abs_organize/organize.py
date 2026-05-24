@@ -74,6 +74,35 @@ def _build_dest_dir(
     return dest_dir
 
 
+def _collision_warnings(
+    dest_dir: Path, *, replace: bool, dry_run: bool
+) -> tuple[str, ...]:
+    messages = [f"Destination title folder already exists: {dest_dir}"]
+    if dry_run and replace:
+        messages.append("Would delete existing title folder (--replace).")
+    elif not replace:
+        messages.append(
+            "Re-run with --replace to delete the existing title folder and copy again."
+        )
+    return tuple(messages)
+
+
+def _assert_replace_safe(dest_dir: Path, library_path: Path) -> None:
+    dest_resolved = dest_dir.resolve()
+    lib_resolved = library_path.resolve()
+    if dest_resolved == lib_resolved:
+        raise ValidationError(f"Refusing to delete library root: {lib_resolved}")
+    if not dest_resolved.is_relative_to(lib_resolved):
+        raise ValidationError(
+            f"Refusing to delete destination outside library root: {dest_resolved}"
+        )
+    if len(dest_resolved.relative_to(lib_resolved).parts) < 2:
+        raise ValidationError(
+            "Refusing to delete destination that is not a title folder under "
+            f"library: {dest_resolved}"
+        )
+
+
 def _planned_filenames(audio: list[BookAudio]) -> tuple[str, ...]:
     return tuple(item.dest_relative.as_posix() for item in audio)
 
@@ -110,6 +139,7 @@ def organize(
     overrides: MetadataOverrides | None = None,
     include_subtitle_in_folder: bool = False,
     dry_run: bool = False,
+    replace: bool = False,
     on_log: Callable[[str], None] | None = None,
 ) -> tuple[OrganizeResult, tuple[str, ...]]:
     input_path = input_path.resolve()
@@ -139,6 +169,26 @@ def organize(
         include_subtitle_in_folder=include_subtitle_in_folder,
         on_log=on_log,
     )
+
+    extra_warnings: tuple[str, ...] = ()
+    if dest_dir.exists():
+        if dry_run:
+            extra_warnings = _collision_warnings(
+                dest_dir, replace=replace, dry_run=True
+            )
+        elif replace:
+            _assert_replace_safe(dest_dir, library_path)
+            try:
+                shutil.rmtree(dest_dir)
+            except OSError as exc:
+                raise OrganizeIOError(
+                    f"Failed to remove existing destination: {exc}"
+                ) from exc
+        else:
+            raise ValidationError(
+                f"Destination title folder already exists: {dest_dir}"
+            )
+
     if dry_run:
         copied_files = _planned_filenames(book_audio)
     else:
@@ -150,7 +200,7 @@ def organize(
             dest_dir=dest_dir,
             copied_files=copied_files,
         ),
-        resolved.warnings,
+        resolved.warnings + extra_warnings,
     )
 
 
@@ -159,12 +209,14 @@ def organize_file(
     library_path: Path,
     *,
     include_subtitle_in_folder: bool = False,
+    replace: bool = False,
     on_log: Callable[[str], None] | None = None,
 ) -> OrganizeResult:
     result, _warnings = organize(
         input_path,
         library_path,
         include_subtitle_in_folder=include_subtitle_in_folder,
+        replace=replace,
         on_log=on_log,
     )
     return result

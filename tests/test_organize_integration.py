@@ -395,20 +395,24 @@ def test_organize_wrapper_matches_book_dir(tmp_path, make_tagged_mp3):
     book_in_wrapper = wrapper / book.name
     book.rename(book_in_wrapper)
 
-    library = tmp_path / "library"
-    library.mkdir()
+    library_direct = tmp_path / "library_direct"
+    library_wrapper = tmp_path / "library_wrapper"
+    library_direct.mkdir()
+    library_wrapper.mkdir()
 
-    direct_result, direct_warnings = organize(book_in_wrapper, library)
-    wrapper_result, wrapper_warnings = organize(wrapper, library)
+    direct_result, direct_warnings = organize(book_in_wrapper, library_direct)
+    wrapper_result, wrapper_warnings = organize(wrapper, library_wrapper)
 
-    dest = library / "Jane Author" / "Book Title"
+    dest = library_direct / "Jane Author" / "Book Title"
+    dest_wrapper = library_wrapper / "Jane Author" / "Book Title"
     assert direct_result.dest_dir == dest
-    assert wrapper_result.dest_dir == dest
+    assert wrapper_result.dest_dir == dest_wrapper
     assert direct_result.copied_files == ("01.mp3", "02.mp3")
     assert wrapper_result.copied_files == direct_result.copied_files
     assert direct_warnings == wrapper_warnings == ()
-    assert (dest / "01.mp3").is_file()
-    assert (dest / "02.mp3").is_file()
+    for lib_dest in (dest, dest_wrapper):
+        assert (lib_dest / "01.mp3").is_file()
+        assert (lib_dest / "02.mp3").is_file()
 
 
 def test_organize_wrapper_dry_run_matches_book_dir(tmp_path, make_tagged_mp3):
@@ -494,3 +498,166 @@ def test_cli_multiple_books_exits_1(tmp_path, make_tagged_m4b, capsys):
     assert str((inbox / "a.m4b").resolve()) in err
     assert str((inbox / "b.m4b").resolve()) in err
     assert not list(library.iterdir())
+
+
+def test_organize_collision_aborts_without_replace(tmp_path, make_tagged_mp3):
+    source = make_tagged_mp3(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    organize_file(source, library)
+    dest_file = library / "Jane Author" / "Book Title" / "book.mp3"
+    assert dest_file.is_file()
+    mtime_before = dest_file.stat().st_mtime
+
+    with pytest.raises(ValidationError, match="already exists"):
+        organize_file(source, library)
+
+    assert dest_file.is_file()
+    assert dest_file.stat().st_mtime == mtime_before
+    assert source.is_file()
+
+
+def test_cli_collision_exits_1(tmp_path, make_tagged_mp3, capsys):
+    from abs_organize.cli import main
+
+    source = make_tagged_mp3(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(source), "--library", str(library)])
+
+    assert exc.value.code == 0
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(source), "--library", str(library)])
+
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    dest = library / "Jane Author" / "Book Title"
+    assert str(dest.resolve()) in err
+    assert "already exists" in err
+
+
+def test_organize_replace_removes_old_tree(tmp_path, make_tagged_mp3):
+    source = make_tagged_mp3(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+    dest_dir = library / "Jane Author" / "Book Title"
+    dest_dir.mkdir(parents=True)
+    stale = dest_dir / "old.mp3"
+    stale.write_bytes(b"stale")
+
+    result = organize_file(source, library, replace=True)
+
+    assert result.copied_files == ("book.mp3",)
+    assert not stale.exists()
+    assert (dest_dir / "book.mp3").is_file()
+
+
+def test_organize_replace_multi_disc(tmp_path, make_tagged_mp3):
+    book = tmp_path / "BookName"
+    book.mkdir()
+    tags = {"albumartist": "Jane Author", "album": "Book Title"}
+    for disc_name, tracks in (
+        ("Disc 1", ("01.mp3", "02.mp3")),
+        ("Disc 2", ("01.mp3", "02.mp3")),
+    ):
+        disc = book / disc_name
+        disc.mkdir()
+        for name in tracks:
+            path = make_tagged_mp3(name=name, **tags)
+            path.rename(disc / name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+    dest_dir = library / "Jane Author" / "Book Title"
+    dest_dir.mkdir(parents=True)
+    wrong_disc = dest_dir / "Wrong Disc"
+    wrong_disc.mkdir()
+    (wrong_disc / "stale.mp3").write_bytes(b"stale")
+
+    result, _ = organize(book, library, replace=True)
+
+    assert not wrong_disc.exists()
+    assert result.copied_files == (
+        "Disc 1/01.mp3",
+        "Disc 1/02.mp3",
+        "Disc 2/01.mp3",
+        "Disc 2/02.mp3",
+    )
+    for rel in result.copied_files:
+        assert (dest_dir / rel).is_file()
+
+
+def test_organize_dry_run_collision_warns_no_delete(tmp_path, make_tagged_mp3):
+    source = make_tagged_mp3(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+    dest_dir = library / "Jane Author" / "Book Title"
+    dest_dir.mkdir(parents=True)
+
+    result, warnings = organize(source, library, dry_run=True)
+
+    assert result.copied_files == ("book.mp3",)
+    assert not (dest_dir / "book.mp3").exists()
+    assert any("already exists" in w for w in warnings)
+    assert any("--replace" in w for w in warnings)
+
+
+def test_cli_dry_run_collision(tmp_path, make_tagged_mp3, capsys):
+    from abs_organize.cli import main
+
+    source = make_tagged_mp3(
+        albumartist="Jane Author",
+        album="Book Title",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+    dest_dir = library / "Jane Author" / "Book Title"
+    dest_dir.mkdir(parents=True)
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(source), "--library", str(library), "--dry-run"])
+
+    assert exc.value.code == 0
+    captured = capsys.readouterr()
+    assert "already exists" in captured.err
+    assert not (dest_dir / "book.mp3").exists()
+
+
+def test_replace_refuses_dest_outside_library(tmp_path):
+    from abs_organize.organize import _assert_replace_safe
+
+    library = tmp_path / "library"
+    library.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "book"
+    marker.mkdir()
+
+    with pytest.raises(ValidationError, match="outside library root"):
+        _assert_replace_safe(marker, library)
+
+
+def test_replace_refuses_library_root(tmp_path):
+    from abs_organize.organize import _assert_replace_safe
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(ValidationError, match="library root"):
+        _assert_replace_safe(library, library)

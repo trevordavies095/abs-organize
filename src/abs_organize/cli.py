@@ -80,6 +80,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="preview destination and planned copies without modifying the library",
     )
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help=(
+            "delete the entire existing destination title folder, then copy "
+            "(destructive; requires an explicit choice when the destination exists)"
+        ),
+    )
     return parser
 
 
@@ -146,6 +154,7 @@ def main(argv: list[str] | None = None) -> None:
             overrides=_metadata_overrides_from_args(args),
             include_subtitle_in_folder=_load_include_subtitle_in_folder(),
             dry_run=args.dry_run,
+            replace=args.replace,
             on_log=on_log,
         )
     except ConfigError as exc:

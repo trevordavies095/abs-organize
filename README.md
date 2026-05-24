@@ -17,13 +17,14 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
-abs-organize INPUT [--profile NAME] [--library PATH] [--dry-run] [-v|--verbose]
+abs-organize INPUT [--profile NAME] [--library PATH] [--dry-run] [--replace] [-v|--verbose]
 ```
 
 - **INPUT** — path to a single audio file or a directory of tracks (`.mp3`, `.m4b`, `.m4a`, `.flac`, `.ogg`)
 - **--profile** — named library profile from config (uses `default` when omitted)
 - **--library** — library root for this run only (overrides config and env)
 - **--dry-run** — print library root, destination, and planned copies; make no changes
+- **--replace** — delete the entire existing destination title folder, then copy (destructive; use when re-organizing)
 - **-v / --verbose** — log path segment sanitization details to stderr
 
 When `[libraries.default]` is configured, you can omit `--library`:
@@ -102,4 +103,4 @@ pytest
 
 ## Roadmap
 
-Covers, and move/replace options are planned in later issues.
+Covers and move are planned in later issues.
