@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from abs_organize.metadata import MetadataError, resolve_metadata
+from abs_organize.metadata import (
+    MetadataError,
+    parse_year,
+    resolve_metadata,
+)
 
 
 class _FakeTags(dict):
@@ -34,6 +38,31 @@ def test_resolve_strips_whitespace():
     meta = resolve_metadata(tags)
     assert meta.author == "Jane"
     assert meta.title == "Book"
+
+
+def test_resolve_optional_fields():
+    tags = _FakeTags(
+        albumartist=["Terry Goodkind"],
+        album=["Wizards First Rule"],
+        grouping=["Sword of Truth"],
+        date=["1994"],
+        composer=["Sam Tsoutsouvas"],
+        subtitle=["Book One"],
+    )
+    meta = resolve_metadata(tags)
+    assert meta.series == "Sword of Truth"
+    assert meta.year == 1994
+    assert meta.narrator == "Sam Tsoutsouvas"
+    assert meta.subtitle == "Book One"
+    assert meta.sequence is None
+
+
+def test_parse_year_from_iso_date():
+    assert parse_year("1994-01-01") == 1994
+
+
+def test_parse_year_invalid():
+    assert parse_year("nineteen ninety-four") is None
 
 
 def test_resolve_missing_author_raises():

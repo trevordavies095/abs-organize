@@ -100,6 +100,48 @@ def test_cli_library_flag_overrides_config(monkeypatch, tmp_path, make_tagged_mp
     assert not list(config_lib.iterdir())
 
 
+def test_cli_include_subtitle_in_folder(
+    monkeypatch, tmp_path, make_tagged_mp3, capsys
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    library = tmp_path / "library"
+    library.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    _write_user_config(
+        home,
+        f"""
+        include_subtitle_in_folder = true
+
+        [libraries.default]
+        path = "{library}"
+        """,
+    )
+
+    source = make_tagged_mp3(
+        albumartist="Terry Goodkind",
+        album="Wizards First Rule",
+        grouping="Sword of Truth",
+        date="1994",
+        composer="Sam Tsoutsouvas",
+        subtitle="Book One",
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(source)])
+
+    assert exc.value.code == 0
+    dest = (
+        library
+        / "Terry Goodkind"
+        / "Sword of Truth"
+        / "1994 - Wizards First Rule - Book One {Sam Tsoutsouvas}"
+        / "book.mp3"
+    )
+    assert dest.is_file()
+
+
 def test_cli_missing_config_exits_1(monkeypatch, tmp_path, make_tagged_mp3, capsys):
     home = tmp_path / "home"
     home.mkdir()

@@ -1,8 +1,9 @@
-"""Read audio metadata and resolve author/title for simple naming."""
+"""Read audio metadata and resolve fields for ABS naming."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from mutagen import File as MutagenFile
@@ -11,6 +12,15 @@ SUPPORTED_EXTENSIONS = {".mp3", ".m4b", ".m4a"}
 
 AUTHOR_KEYS = ("albumartist", "artist")
 TITLE_KEYS = ("album", "title")
+NARRATOR_KEYS = ("composer",)
+YEAR_KEYS = ("date",)
+SUBTITLE_KEYS = ("subtitle",)
+SERIES_KEYS = ("grouping",)
+
+_MP4_MOVEMENT_NAME = "\xa9mvn"
+_MP4_MOVEMENT_INDEX = "\xa9mvi"
+_MP4_COMPOSER = "\xa9wrt"
+_YEAR_PATTERN = re.compile(r"^(\d{4})")
 
 
 class MetadataError(Exception):
@@ -25,6 +35,11 @@ class ValidationError(Exception):
 class BookMetadata:
     author: str
     title: str
+    series: str | None = None
+    sequence: int | float | None = None
+    year: int | None = None
+    narrator: str | None = None
+    subtitle: str | None = None
 
 
 def _tag_value(tags: object, key: str) -> str | None:
@@ -46,6 +61,81 @@ def _first_tag(tags: object, keys: tuple[str, ...]) -> str | None:
         value = _tag_value(tags, key)
         if value:
             return value
+    return None
+
+
+def parse_year(value: str | None) -> int | None:
+    if not value:
+        return None
+    match = _YEAR_PATTERN.match(value.strip())
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _mp4_atom_text(tags: object, key: str) -> str | None:
+    if tags is None:
+        return None
+    raw = tags.get(key)
+    if raw is None:
+        return None
+    if isinstance(raw, (list, tuple)):
+        if not raw:
+            return None
+        raw = raw[0]
+    text = str(raw).strip()
+    return text or None
+
+
+def _mp4_atom_number(tags: object, key: str) -> int | float | None:
+    if tags is None:
+        return None
+    raw = tags.get(key)
+    if raw is None:
+        return None
+    if isinstance(raw, (list, tuple)):
+        if not raw:
+            return None
+        raw = raw[0]
+    if isinstance(raw, (int, float)):
+        return raw
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    if number.is_integer():
+        return int(number)
+    return number
+
+
+def _read_mp4_movement(path: Path) -> tuple[str | None, int | float | None]:
+    audio = MutagenFile(path)
+    if audio is None or audio.tags is None:
+        return None, None
+    series = _mp4_atom_text(audio.tags, _MP4_MOVEMENT_NAME)
+    sequence = _mp4_atom_number(audio.tags, _MP4_MOVEMENT_INDEX)
+    return series, sequence
+
+
+def _read_mp4_narrator(path: Path) -> str | None:
+    audio = MutagenFile(path)
+    if audio is None or audio.tags is None:
+        return None
+    return _mp4_atom_text(audio.tags, _MP4_COMPOSER)
+
+
+def _read_id3_subtitle(path: Path) -> str | None:
+    audio = MutagenFile(path)
+    if audio is None or audio.tags is None:
+        return None
+    for frame in audio.tags.getall("TIT3"):
+        if frame.text:
+            text = str(frame.text[0]).strip()
+            if text:
+                return text
     return None
 
 
@@ -73,9 +163,39 @@ def resolve_metadata(tags: object) -> BookMetadata:
             + ". Set tags on the file or use a tagged source."
         )
 
-    return BookMetadata(author=author, title=title)
+    return BookMetadata(
+        author=author,
+        title=title,
+        series=_first_tag(tags, SERIES_KEYS),
+        year=parse_year(_first_tag(tags, YEAR_KEYS)),
+        narrator=_first_tag(tags, NARRATOR_KEYS),
+        subtitle=_first_tag(tags, SUBTITLE_KEYS),
+    )
 
 
 def read_book_metadata(path: Path) -> BookMetadata:
     tags = read_tags(path)
-    return resolve_metadata(tags)
+    metadata = resolve_metadata(tags)
+
+    suffix = path.suffix.lower()
+    updates: dict[str, object] = {}
+
+    if suffix == ".mp3":
+        if metadata.subtitle is None:
+            subtitle = _read_id3_subtitle(path)
+            if subtitle:
+                updates["subtitle"] = subtitle
+    elif suffix in {".m4b", ".m4a"}:
+        mp4_series, mp4_sequence = _read_mp4_movement(path)
+        if metadata.series is None and mp4_series:
+            updates["series"] = mp4_series
+        if metadata.sequence is None and mp4_sequence is not None:
+            updates["sequence"] = mp4_sequence
+        if metadata.narrator is None:
+            narrator = _read_mp4_narrator(path)
+            if narrator:
+                updates["narrator"] = narrator
+
+    if updates:
+        return replace(metadata, **updates)
+    return metadata

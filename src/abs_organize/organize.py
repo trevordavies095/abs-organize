@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,7 +13,7 @@ from abs_organize.metadata import (
     ValidationError,
     read_book_metadata,
 )
-from abs_organize.naming import book_destination_dirs
+from abs_organize.naming import book_destination_segments
 
 
 class OrganizeIOError(Exception):
@@ -45,7 +46,13 @@ def _validate_library(library: Path) -> None:
         raise ValidationError(f"Library path must be a directory: {library}")
 
 
-def organize_file(input_path: Path, library_path: Path) -> OrganizeResult:
+def organize_file(
+    input_path: Path,
+    library_path: Path,
+    *,
+    include_subtitle_in_folder: bool = False,
+    on_log: Callable[[str], None] | None = None,
+) -> OrganizeResult:
     input_path = input_path.resolve()
     library_path = library_path.resolve()
 
@@ -57,8 +64,15 @@ def organize_file(input_path: Path, library_path: Path) -> OrganizeResult:
     except MetadataError:
         raise
 
-    author_seg, title_seg = book_destination_dirs(metadata)
-    dest_dir = library_path / author_seg / title_seg
+    author_seg, series_seg, title_seg = book_destination_segments(
+        metadata,
+        include_subtitle_in_folder=include_subtitle_in_folder,
+        on_log=on_log,
+    )
+    dest_dir = library_path / author_seg
+    if series_seg:
+        dest_dir /= series_seg
+    dest_dir /= title_seg
     dest_file = dest_dir / input_path.name
 
     try:

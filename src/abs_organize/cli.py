@@ -10,9 +10,15 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
-from abs_organize.config import ENV_LIBRARY, ConfigError, resolve_library_path
+from abs_organize.config import (
+    ENV_LIBRARY,
+    ConfigError,
+    load_config,
+    resolve_library_path,
+)
 from abs_organize.metadata import MetadataError, ValidationError
 from abs_organize.organize import OrganizeIOError, OrganizeResult, organize_file
 
@@ -22,7 +28,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="abs-organize",
         description=(
             "Copy a tagged audiobook file into an Audiobookshelf library layout "
-            "({library}/{Author}/{Title}/)."
+            "({library}/{Author}/[{Series}/]{TitleFolder}/)."
         ),
     )
     parser.add_argument(
@@ -46,7 +52,20 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="named library profile from config (default profile when omitted)",
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="log path segment sanitization details to stderr",
+    )
     return parser
+
+
+def _load_include_subtitle_in_folder() -> bool:
+    try:
+        return load_config().include_subtitle_in_folder
+    except ConfigError:
+        return False
 
 
 def _print_result(result: OrganizeResult) -> None:
@@ -61,12 +80,21 @@ def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    on_log: Callable[[str], None] | None = None
+    if args.verbose:
+        on_log = lambda message: print(message, file=sys.stderr)
+
     try:
         library = resolve_library_path(
             library_flag=args.library,
             profile=args.profile,
         )
-        result = organize_file(args.input, library)
+        result = organize_file(
+            args.input,
+            library,
+            include_subtitle_in_folder=_load_include_subtitle_in_folder(),
+            on_log=on_log,
+        )
     except ConfigError as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from exc

@@ -1,6 +1,6 @@
 # abs-organize
 
-A Python CLI that copies a tagged audiobook file into an [Audiobookshelf](https://www.audiobookshelf.org/) library layout (`{library}/{Author}/{Title}/`).
+A Python CLI that copies a tagged audiobook file into an [Audiobookshelf](https://www.audiobookshelf.org/) library layout (`{library}/{Author}/[{Series}/]{TitleFolder}/`).
 
 ## Install
 
@@ -17,12 +17,13 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
-abs-organize INPUT [--profile NAME] [--library PATH]
+abs-organize INPUT [--profile NAME] [--library PATH] [-v|--verbose]
 ```
 
 - **INPUT** — path to a single `.mp3`, `.m4b`, or `.m4a` file
 - **--profile** — named library profile from config (uses `default` when omitted)
 - **--library** — library root for this run only (overrides config and env)
+- **-v / --verbose** — log path segment sanitization details to stderr
 
 When `[libraries.default]` is configured, you can omit `--library`:
 
@@ -36,7 +37,15 @@ Example with an explicit library path (no config required):
 abs-organize ~/Downloads/book.m4b --library ~/Audiobooks
 ```
 
-Metadata is read from embedded tags (Mutagen). Author comes from `albumartist` or `artist`; title from `album` or `title`. The file is **copied** (not moved), keeping its original basename.
+Metadata is read from embedded tags (Mutagen). Author comes from `albumartist` or `artist`; title from `album` or `title`. Optional tags drive ABS-style folders: `grouping` (series), `date` (year), `composer` (narrator), and on `.m4b`/`.m4a` iTunes movement atoms when present.
+
+**Example layout (series):**
+
+```text
+{library}/Terry Goodkind/Sword of Truth/Vol 1 - 1994 - Wizards First Rule {Sam Tsoutsouvas}/book.m4b
+```
+
+The file is **copied** (not moved), keeping its original basename.
 
 ## Configuration
 
@@ -54,7 +63,7 @@ path = "/Users/you/Audiobooks/Fiction"
 
 - **`[libraries.default]`** is required.
 - Additional profiles (e.g. `[libraries.fiction]`) are optional.
-- `include_subtitle_in_folder` is parsed for future naming behavior; it has no effect yet.
+- `include_subtitle_in_folder` — when `true`, appends ` - {subtitle}` to the title folder name (from the `subtitle` tag).
 
 ### Library path precedence
 
@@ -83,4 +92,4 @@ pytest
 
 ## Roadmap
 
-Dry-run, multi-file folders, series folders, covers, and move/replace options are planned in later issues.
+Dry-run, multi-file folders, covers, and move/replace options are planned in later issues.

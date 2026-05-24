@@ -30,15 +30,47 @@ def test_organize_m4b_with_artist_and_title(tmp_path, make_tagged_m4b):
     source = make_tagged_m4b(
         name="audiobook.m4b",
         artist="Steven Levy",
-        title="Hackers",
+        title="Hackers - Heroes of the Computer Revolution",
+        narrator="Mike Chamberlain",
     )
     library = tmp_path / "library"
     library.mkdir()
 
     organize_file(source, library)
 
-    dest = library / "Steven Levy" / "Hackers" / "audiobook.m4b"
+    dest = (
+        library
+        / "Steven Levy"
+        / "Hackers - Heroes of the Computer Revolution {Mike Chamberlain}"
+        / "audiobook.m4b"
+    )
     assert dest.is_file()
+
+
+def test_organize_maximal_series_layout(tmp_path, make_tagged_m4b_with_movement):
+    source = make_tagged_m4b_with_movement(
+        albumartist="Terry Goodkind",
+        album="Wizards First Rule",
+        grouping="Sword of Truth",
+        date="1994",
+        movement_name="Sword of Truth",
+        movement_index=1,
+        narrator="Sam Tsoutsouvas",
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result = organize_file(source, library)
+
+    dest = (
+        library
+        / "Terry Goodkind"
+        / "Sword of Truth"
+        / "Vol 1 - 1994 - Wizards First Rule {Sam Tsoutsouvas}"
+        / "book.m4b"
+    )
+    assert dest.is_file()
+    assert result.dest_dir == dest.parent
 
 
 def test_organize_missing_metadata_exits_with_metadata_error(make_tagged_mp3, tmp_path):
