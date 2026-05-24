@@ -8,6 +8,7 @@ from abs_organize.discovery import (
     collect_book_audio,
     collect_track_files,
     discover_book_root,
+    discover_book_roots,
     find_cover_sidecar,
     is_disc_folder_name,
     list_copy_sidecars,
@@ -94,6 +95,7 @@ def test_discover_book_root_two_sibling_m4b(tmp_path, make_tagged_m4b):
     message = str(exc.value)
     assert str((root / "a.m4b").resolve()) in message
     assert str((root / "b.m4b").resolve()) in message
+    assert "--batch" in message
 
 
 def test_discover_book_root_two_book_subfolders(tmp_path, make_tagged_mp3):
@@ -113,6 +115,52 @@ def test_discover_book_root_two_book_subfolders(tmp_path, make_tagged_mp3):
     message = str(exc.value)
     assert str((root / "bookA").resolve()) in message
     assert str((root / "bookB").resolve()) in message
+    assert "--batch" in message
+
+
+def test_discover_book_roots_two_book_subfolders(tmp_path, make_tagged_mp3):
+    root = tmp_path / "inbox"
+    root.mkdir()
+    for folder, album in (("bookA", "Alpha"), ("bookB", "Beta")):
+        book_dir = root / folder
+        book_dir.mkdir()
+        path = make_tagged_mp3(
+            name="01.mp3", albumartist="Jane Author", album=album
+        )
+        path.rename(book_dir / path.name)
+
+    roots = discover_book_roots(root)
+    assert roots == [
+        (root / "bookA").resolve(),
+        (root / "bookB").resolve(),
+    ]
+
+
+def test_discover_book_roots_multi_disc(tmp_path, make_tagged_mp3):
+    book = tmp_path / "Book"
+    book.mkdir()
+    tags = {"albumartist": "Jane Author", "album": "Book Title"}
+    for disc_name in ("Disc 1", "Disc 2"):
+        disc = book / disc_name
+        disc.mkdir()
+        path = make_tagged_mp3(name="01.mp3", **tags)
+        path.rename(disc / path.name)
+
+    assert discover_book_roots(book) == [book.resolve()]
+
+
+def test_discover_book_roots_mixed_container_and_mp3(
+    tmp_path, make_tagged_m4b, make_tagged_mp3
+):
+    root = tmp_path / "inbox"
+    root.mkdir()
+    m4b = make_tagged_m4b(name="book.m4b", artist="A", title="T")
+    mp3 = make_tagged_mp3(name="01.mp3", albumartist="A", album="T")
+    m4b.rename(root / "book.m4b")
+    mp3.rename(root / "01.mp3")
+
+    with pytest.raises(ValidationError, match="Multiple books detected"):
+        discover_book_roots(root)
 
 
 def test_discover_book_root_mixed_container_and_mp3(tmp_path, make_tagged_m4b, make_tagged_mp3):

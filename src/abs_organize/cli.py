@@ -20,6 +20,7 @@ from abs_organize.config import (
     load_config,
     resolve_library_path,
 )
+from abs_organize.batch import BatchResult, organize_batch
 from abs_organize.metadata import MetadataError, MetadataOverrides, ValidationError
 from abs_organize.organize import OrganizeIOError, OrganizeResult, organize
 
@@ -111,6 +112,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="on success, print minimal JSON to stdout (for scripting)",
     )
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help=(
+            "organize every detected book root under INPUT (multi-book inbox); "
+            "without this flag, multi-book INPUT fails with a candidate list"
+        ),
+    )
     return parser
 
 
@@ -175,6 +184,71 @@ def _print_result(
             print(f"  {name}")
 
 
+def _batch_exit_code(batch: BatchResult) -> int:
+    if batch.ok_count == len(batch.outcomes):
+        return 0
+    if batch.had_io_error:
+        return 2
+    return 1
+
+
+def _run_batch(
+    args: argparse.Namespace,
+    library: Path,
+    on_log: Callable[[str], None] | None,
+) -> None:
+    batch = organize_batch(
+        args.input,
+        library,
+        overrides=_metadata_overrides_from_args(args),
+        include_subtitle_in_folder=_load_include_subtitle_in_folder(),
+        dry_run=args.dry_run,
+        move=args.move,
+        replace=args.replace,
+        allow_guess=args.allow_guess,
+        on_log=on_log,
+    )
+
+    if args.json:
+        if len(batch.outcomes) > 1:
+            print(
+                "Batch JSON output is not supported for multi-book runs in this version.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        if len(batch.outcomes) != 1 or not batch.outcomes[0].ok:
+            if len(batch.outcomes) == 1 and batch.outcomes[0].error:
+                print(batch.outcomes[0].error, file=sys.stderr)
+            raise SystemExit(_batch_exit_code(batch))
+        outcome = batch.outcomes[0]
+        assert outcome.result is not None
+        _print_json(outcome.result, outcome.warnings)
+        raise SystemExit(0)
+
+    for index, outcome in enumerate(batch.outcomes):
+        if index > 0:
+            print()
+        if not outcome.ok:
+            if outcome.error:
+                print(outcome.error, file=sys.stderr)
+            continue
+        assert outcome.result is not None
+        for warning in outcome.warnings:
+            print(warning, file=sys.stderr)
+        _print_result(
+            outcome.result,
+            library=library,
+            dry_run=args.dry_run,
+            move=args.move,
+        )
+
+    print(
+        f"Batch complete: {batch.ok_count} ok, {batch.failed_count} failed",
+        file=sys.stderr,
+    )
+    raise SystemExit(_batch_exit_code(batch))
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -188,6 +262,8 @@ def main(argv: list[str] | None = None) -> None:
             library_flag=args.library,
             profile=args.profile,
         )
+        if args.batch:
+            _run_batch(args, library, on_log)
         result, warnings = organize(
             args.input,
             library,

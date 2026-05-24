@@ -31,6 +31,8 @@ _MULTIPLE_BOOKS_PREFIX = (
     "Multiple books detected in INPUT. Re-run on one book at a time:"
 )
 
+_BATCH_HINT = "Or re-run with --batch to organize all detected books."
+
 
 def is_disc_folder_name(name: str) -> bool:
     """Return True if *name* matches Audiobookshelf disc subfolder naming."""
@@ -112,23 +114,50 @@ def _book_roots_at(directory: Path, *, depth_remaining: int) -> list[Path]:
 
 def _format_multiple_books(candidates: list[Path]) -> str:
     lines = "\n".join(f"  {path}" for path in sorted(candidates, key=str))
-    return f"{_MULTIPLE_BOOKS_PREFIX}\n{lines}"
+    return f"{_MULTIPLE_BOOKS_PREFIX}\n{lines}\n{_BATCH_HINT}"
 
 
-def discover_book_root(
+def _is_ambiguous_mixed_layout(roots: list[Path]) -> bool:
+    """True when any root directory has container and track-style siblings."""
+    for root in roots:
+        if not root.is_dir():
+            continue
+        direct_audio = _direct_audio_files(root)
+        if not direct_audio:
+            continue
+        containers = [
+            f for f in direct_audio if f.suffix.lower() in _CONTAINER_EXTENSIONS
+        ]
+        track_style = [
+            f for f in direct_audio if f.suffix.lower() not in _CONTAINER_EXTENSIONS
+        ]
+        if containers and track_style:
+            return True
+    return False
+
+
+def _unique_sorted_roots(roots: list[Path]) -> list[Path]:
+    by_key: dict[str, Path] = {}
+    for path in roots:
+        resolved = path.resolve()
+        by_key[str(resolved)] = resolved
+    return [by_key[key] for key in sorted(by_key)]
+
+
+def discover_book_roots(
     input_path: Path, *, max_depth: int = MAX_DISCOVERY_DEPTH
-) -> Path:
-    """Resolve a single book root under *input_path*.
+) -> list[Path]:
+    """Return all book roots under *input_path* (sorted, unique).
 
-    For a file path, returns the resolved file. For a directory, locates the
-    unique book root using container vs track-style rules and optional wrapper
-    descent. Raises ``ValidationError`` when no book is found or when multiple
-    disjoint roots are detected (candidate paths are listed in the message).
+    For a file path, returns a one-element list. For a directory, enumerates
+    roots using the same rules as ``discover_book_root``. Raises
+    ``ValidationError`` when no book is found or when an ambiguous mixed
+    container + track-style layout is detected.
     """
     input_path = input_path.resolve()
 
     if input_path.is_file():
-        return input_path
+        return [input_path]
 
     if not input_path.is_dir():
         raise ValidationError(f"Input must be a file or directory: {input_path}")
@@ -141,9 +170,27 @@ def discover_book_root(
             f"No audio files found in {input_path}; supported extensions: {supported}"
         )
 
+    unique_roots = _unique_sorted_roots(roots)
+
+    if len(unique_roots) > 1 and _is_ambiguous_mixed_layout(unique_roots):
+        raise ValidationError(_format_multiple_books(unique_roots))
+
+    return unique_roots
+
+
+def discover_book_root(
+    input_path: Path, *, max_depth: int = MAX_DISCOVERY_DEPTH
+) -> Path:
+    """Resolve a single book root under *input_path*.
+
+    For a file path, returns the resolved file. For a directory, locates the
+    unique book root using container vs track-style rules and optional wrapper
+    descent. Raises ``ValidationError`` when no book is found or when multiple
+    disjoint roots are detected (candidate paths are listed in the message).
+    """
+    roots = discover_book_roots(input_path, max_depth=max_depth)
     if len(roots) > 1:
         raise ValidationError(_format_multiple_books(roots))
-
     return roots[0]
 
 

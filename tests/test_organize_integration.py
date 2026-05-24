@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from abs_organize.batch import organize_batch
 from abs_organize.metadata import MetadataError, MetadataOverrides, ValidationError
 from abs_organize.organize import organize, organize_file
 
@@ -621,7 +622,131 @@ def test_cli_multiple_books_exits_1(tmp_path, make_tagged_m4b, capsys):
     assert "Multiple books detected" in err
     assert str((inbox / "a.m4b").resolve()) in err
     assert str((inbox / "b.m4b").resolve()) in err
+    assert "--batch" in err
     assert not list(library.iterdir())
+
+
+def _two_book_subfolder_inbox(tmp_path, make_tagged_mp3) -> tuple[Path, Path]:
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    for folder, album in (("bookA", "Alpha"), ("bookB", "Beta")):
+        book_dir = inbox / folder
+        book_dir.mkdir()
+        path = make_tagged_mp3(
+            name="01.mp3", albumartist="Jane Author", album=album
+        )
+        path.rename(book_dir / path.name)
+    library = tmp_path / "library"
+    library.mkdir()
+    return inbox, library
+
+
+def test_organize_batch_dry_run_two_subfolders(tmp_path, make_tagged_mp3):
+    inbox, library = _two_book_subfolder_inbox(tmp_path, make_tagged_mp3)
+
+    batch = organize_batch(inbox, library, dry_run=True)
+
+    assert batch.ok_count == 2
+    assert batch.failed_count == 0
+    assert len(batch.outcomes) == 2
+    destinations = {outcome.result.dest_dir.name for outcome in batch.outcomes}
+    assert destinations == {"Alpha", "Beta"}
+    assert not list(library.iterdir())
+
+
+def test_organize_batch_apply_two_subfolders(tmp_path, make_tagged_mp3):
+    inbox, library = _two_book_subfolder_inbox(tmp_path, make_tagged_mp3)
+
+    batch = organize_batch(inbox, library)
+
+    assert batch.ok_count == 2
+    assert batch.failed_count == 0
+    author_dir = library / "Jane Author"
+    assert (author_dir / "Alpha" / "01.mp3").is_file()
+    assert (author_dir / "Beta" / "01.mp3").is_file()
+
+
+def test_organize_batch_apply_stops_on_first_failure(tmp_path, make_tagged_mp3):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    for folder, album in (("bookA", "Alpha"), ("bookB", "Beta"), ("bookC", "Gamma")):
+        book_dir = inbox / folder
+        book_dir.mkdir()
+        path = make_tagged_mp3(
+            name="01.mp3", albumartist="Jane Author", album=album
+        )
+        path.rename(book_dir / path.name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+    organize_file(inbox / "bookB" / "01.mp3", library)
+
+    batch = organize_batch(inbox, library)
+
+    assert batch.ok_count == 1
+    assert batch.failed_count == 1
+    assert len(batch.outcomes) == 2
+    assert batch.outcomes[0].ok
+    assert not batch.outcomes[1].ok
+    assert "already exists" in (batch.outcomes[1].error or "")
+    assert not (library / "Jane Author" / "Gamma").exists()
+
+
+def test_organize_batch_single_root_matches_wrapper_organize(
+    tmp_path, make_tagged_mp3
+):
+    book = tmp_path / "BookName"
+    book.mkdir()
+    tags = {"albumartist": "Jane Author", "album": "Book Title"}
+    for i in range(1, 3):
+        path = make_tagged_mp3(name=f"{i:02d}.mp3", **tags)
+        path.rename(book / path.name)
+
+    wrapper = tmp_path / "wrapper"
+    wrapper.mkdir()
+    book.rename(wrapper / book.name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    single, _ = organize(wrapper, library, dry_run=True)
+    batch = organize_batch(wrapper, library, dry_run=True)
+
+    assert batch.ok_count == 1
+    assert batch.outcomes[0].result is not None
+    assert batch.outcomes[0].result.source == wrapper.resolve()
+    assert batch.outcomes[0].result.dest_dir == single.dest_dir
+    assert batch.outcomes[0].result.copied_files == single.copied_files
+
+
+def test_cli_batch_dry_run_two_subfolders(tmp_path, make_tagged_mp3, capsys):
+    from abs_organize.cli import main
+
+    inbox, library = _two_book_subfolder_inbox(tmp_path, make_tagged_mp3)
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(inbox), "--library", str(library), "--batch", "--dry-run"])
+
+    assert exc.value.code == 0
+    captured = capsys.readouterr()
+    assert "Alpha" in captured.out
+    assert "Beta" in captured.out
+    assert "Batch complete: 2 ok, 0 failed" in captured.err
+
+
+def test_cli_batch_apply_two_subfolders(tmp_path, make_tagged_mp3, capsys):
+    from abs_organize.cli import main
+
+    inbox, library = _two_book_subfolder_inbox(tmp_path, make_tagged_mp3)
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(inbox), "--library", str(library), "--batch"])
+
+    assert exc.value.code == 0
+    assert (library / "Jane Author" / "Alpha" / "01.mp3").is_file()
+    assert (library / "Jane Author" / "Beta" / "01.mp3").is_file()
+    err = capsys.readouterr().err
+    assert "Batch complete: 2 ok, 0 failed" in err
 
 
 def test_organize_collision_aborts_without_replace(tmp_path, make_tagged_mp3):
