@@ -7,7 +7,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from abs_organize.discovery import find_track_files, list_sidecars
+from abs_organize.discovery import (
+    collect_track_files,
+    discover_book_root,
+    list_sidecars,
+)
 from abs_organize.metadata import (
     BookMetadata,
     MetadataError,
@@ -108,9 +112,10 @@ def organize(
     if input_path.is_file():
         track_files = [input_path]
     else:
-        track_files = find_track_files(input_path)
+        book_root = discover_book_root(input_path)
+        track_files = collect_track_files(book_root)
         if on_log is not None:
-            for sidecar in list_sidecars(input_path):
+            for sidecar in list_sidecars(book_root):
                 on_log(f"Sidecar found (not copied): {sidecar.name}")
 
     try:

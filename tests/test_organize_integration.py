@@ -322,3 +322,121 @@ def test_organize_cli_overrides_fix_bad_rip(
     err = capsys.readouterr().err
     assert "author tag conflict" not in err
     assert "title tag conflict" not in err
+
+
+def _make_flat_book_dir(tmp_path, make_tagged_mp3, *, parent: Path, name: str = "BookName"):
+    book = parent / name
+    book.mkdir()
+    tags = {"albumartist": "Jane Author", "album": "Book Title"}
+    for i in range(1, 3):
+        path = make_tagged_mp3(name=f"{i:02d}.mp3", **tags)
+        path.rename(book / path.name)
+    return book
+
+
+def test_organize_wrapper_matches_book_dir(tmp_path, make_tagged_mp3):
+    book = _make_flat_book_dir(tmp_path, make_tagged_mp3, parent=tmp_path)
+    wrapper = tmp_path / "wrapper"
+    wrapper.mkdir()
+    book_in_wrapper = wrapper / book.name
+    book.rename(book_in_wrapper)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    direct_result, direct_warnings = organize(book_in_wrapper, library)
+    wrapper_result, wrapper_warnings = organize(wrapper, library)
+
+    dest = library / "Jane Author" / "Book Title"
+    assert direct_result.dest_dir == dest
+    assert wrapper_result.dest_dir == dest
+    assert direct_result.copied_files == ("01.mp3", "02.mp3")
+    assert wrapper_result.copied_files == direct_result.copied_files
+    assert direct_warnings == wrapper_warnings == ()
+    assert (dest / "01.mp3").is_file()
+    assert (dest / "02.mp3").is_file()
+
+
+def test_organize_wrapper_dry_run_matches_book_dir(tmp_path, make_tagged_mp3):
+    book = _make_flat_book_dir(tmp_path, make_tagged_mp3, parent=tmp_path)
+    wrapper = tmp_path / "wrapper"
+    wrapper.mkdir()
+    book_in_wrapper = wrapper / book.name
+    book.rename(book_in_wrapper)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    direct_result, _ = organize(book_in_wrapper, library, dry_run=True)
+    wrapper_result, _ = organize(wrapper, library, dry_run=True)
+
+    assert direct_result.dest_dir == wrapper_result.dest_dir
+    assert direct_result.copied_files == wrapper_result.copied_files
+    assert not (library / "Jane Author").exists()
+
+
+def test_organize_two_sibling_m4b_fails(tmp_path, make_tagged_m4b):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    a = make_tagged_m4b(name="a.m4b", artist="A1", title="T1")
+    b = make_tagged_m4b(name="b.m4b", artist="A2", title="T2")
+    a.rename(inbox / "a.m4b")
+    b.rename(inbox / "b.m4b")
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(ValidationError, match="Multiple books detected") as exc:
+        organize(inbox, library)
+
+    message = str(exc.value)
+    assert str((inbox / "a.m4b").resolve()) in message
+    assert str((inbox / "b.m4b").resolve()) in message
+    assert not list(library.iterdir())
+
+
+def test_organize_two_book_subfolders_fails(tmp_path, make_tagged_mp3):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    for folder, album in (("bookA", "Alpha"), ("bookB", "Beta")):
+        book_dir = inbox / folder
+        book_dir.mkdir()
+        path = make_tagged_mp3(
+            name="01.mp3", albumartist="Jane Author", album=album
+        )
+        path.rename(book_dir / path.name)
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(ValidationError, match="Multiple books detected") as exc:
+        organize(inbox, library)
+
+    message = str(exc.value)
+    assert str((inbox / "bookA").resolve()) in message
+    assert str((inbox / "bookB").resolve()) in message
+    assert not list(library.iterdir())
+
+
+def test_cli_multiple_books_exits_1(tmp_path, make_tagged_m4b, capsys):
+    from abs_organize.cli import main
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    a = make_tagged_m4b(name="a.m4b", artist="A1", title="T1")
+    b = make_tagged_m4b(name="b.m4b", artist="A2", title="T2")
+    a.rename(inbox / "a.m4b")
+    b.rename(inbox / "b.m4b")
+
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(inbox), "--library", str(library)])
+
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "Multiple books detected" in err
+    assert str((inbox / "a.m4b").resolve()) in err
+    assert str((inbox / "b.m4b").resolve()) in err
+    assert not list(library.iterdir())
