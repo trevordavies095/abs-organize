@@ -20,6 +20,7 @@ from abs_organize.metadata import (
     MetadataOverrides,
     SUPPORTED_EXTENSIONS,
     ValidationError,
+    apply_folder_guess,
     apply_gap_fill,
     resolve_book_metadata,
 )
@@ -228,6 +229,7 @@ def organize(
     include_subtitle_in_folder: bool = False,
     dry_run: bool = False,
     replace: bool = False,
+    allow_guess: bool = False,
     on_log: Callable[[str], None] | None = None,
 ) -> tuple[OrganizeResult, tuple[str, ...]]:
     input_path = input_path.resolve()
@@ -247,7 +249,9 @@ def organize(
     copy_sidecars = list_copy_sidecars(sidecar_root_path)
     track_files = [item.source for item in book_audio]
 
-    resolved = resolve_book_metadata(track_files, overrides=overrides)
+    resolved = resolve_book_metadata(
+        track_files, overrides=overrides, allow_guess=allow_guess
+    )
     opf_metadata, reader_txt = _resolve_gap_fill_sources(
         copy_sidecars, on_log=on_log
     )
@@ -257,6 +261,11 @@ def organize(
         reader_txt=reader_txt,
         overrides=overrides,
     )
+    if allow_guess:
+        guess_name = book_root.stem if book_root.is_file() else book_root.name
+        resolved = apply_folder_guess(
+            resolved, name=guess_name, overrides=overrides
+        )
 
     dest_dir = _build_dest_dir(
         resolved.metadata,

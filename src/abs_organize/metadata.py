@@ -170,26 +170,27 @@ def read_tags(path: Path) -> object:
     return audio.tags
 
 
-def resolve_metadata(tags: object) -> BookMetadata:
+def resolve_metadata(tags: object, *, lenient: bool = False) -> BookMetadata:
     author = _first_tag(tags, AUTHOR_KEYS)
     title = _first_tag(tags, TITLE_KEYS)
 
-    missing: list[str] = []
-    if not author:
-        missing.append(f"author ({' or '.join(AUTHOR_KEYS)})")
-    if not title:
-        missing.append(f"title ({' or '.join(TITLE_KEYS)})")
+    if not lenient:
+        missing: list[str] = []
+        if not author:
+            missing.append(f"author ({' or '.join(AUTHOR_KEYS)})")
+        if not title:
+            missing.append(f"title ({' or '.join(TITLE_KEYS)})")
 
-    if missing:
-        raise MetadataError(
-            "Missing required metadata: "
-            + ", ".join(missing)
-            + ". Set tags on the file or use a tagged source."
-        )
+        if missing:
+            raise MetadataError(
+                "Missing required metadata: "
+                + ", ".join(missing)
+                + ". Set tags on the file or use a tagged source."
+            )
 
     return BookMetadata(
-        author=author,
-        title=title,
+        author=author or "",
+        title=title or "",
         series=_first_tag(tags, SERIES_KEYS),
         year=parse_year(_first_tag(tags, YEAR_KEYS)),
         narrator=_first_tag(tags, NARRATOR_KEYS),
@@ -197,9 +198,9 @@ def resolve_metadata(tags: object) -> BookMetadata:
     )
 
 
-def read_book_metadata(path: Path) -> BookMetadata:
+def read_book_metadata(path: Path, *, lenient: bool = False) -> BookMetadata:
     tags = read_tags(path)
-    metadata = resolve_metadata(tags)
+    metadata = resolve_metadata(tags, lenient=lenient)
 
     suffix = path.suffix.lower()
     updates: dict[str, object] = {}
@@ -262,11 +263,14 @@ def _vote_field(
     field_name: str,
     getter: Callable[[BookMetadata], Any],
     required: bool,
+    defer_required: bool = False,
 ) -> tuple[Any, str | None]:
     values = [getter(m) for m in per_file]
     non_empty = [v for v in values if v is not None and v != ""]
     if not non_empty:
         if required:
+            if defer_required:
+                return "", None
             raise MetadataError(
                 f"No majority for required field {field_name!r} across audio files."
             )
@@ -305,6 +309,7 @@ def resolve_majority(
     per_file: list[BookMetadata],
     *,
     overrides: MetadataOverrides | None = None,
+    defer_required: bool = False,
 ) -> ResolvedMetadata:
     if not per_file:
         raise MetadataError("No audio files to resolve metadata from.")
@@ -336,7 +341,11 @@ def resolve_majority(
             fields[field_name] = override_fields[field_name]
             continue
         value, warning = _vote_field(
-            per_file, field_name=field_name, getter=getter, required=required
+            per_file,
+            field_name=field_name,
+            getter=getter,
+            required=required,
+            defer_required=defer_required,
         )
         fields[field_name] = value
         if warning:
@@ -358,9 +367,14 @@ def resolve_book_metadata(
     paths: list[Path],
     *,
     overrides: MetadataOverrides | None = None,
+    allow_guess: bool = False,
 ) -> ResolvedMetadata:
-    per_file = [read_book_metadata(path) for path in paths]
-    return resolve_majority(per_file, overrides=overrides)
+    per_file = [
+        read_book_metadata(path, lenient=allow_guess) for path in paths
+    ]
+    return resolve_majority(
+        per_file, overrides=overrides, defer_required=allow_guess
+    )
 
 
 _GAP_FILL_FIELDS = ("series", "sequence", "year", "narrator", "subtitle")
@@ -406,3 +420,89 @@ def apply_gap_fill(
 
     metadata = replace(current, **updates)
     return ResolvedMetadata(metadata=metadata, warnings=resolved.warnings)
+
+
+def _field_is_empty(value: str | int | float | None) -> bool:
+    return value is None or value == ""
+
+
+def apply_folder_guess(
+    resolved: ResolvedMetadata,
+    *,
+    name: str,
+    overrides: MetadataOverrides | None = None,
+) -> ResolvedMetadata:
+    """Fill missing author/title from folder or file stem when allow_guess is set."""
+    from abs_organize.heuristics import guess_from_name
+
+    overrides = overrides or MetadataOverrides()
+    current = resolved.metadata
+    warnings = list(resolved.warnings)
+
+    author = overrides.author if overrides.author is not None else current.author
+    title = overrides.title if overrides.title is not None else current.title
+
+    if not _field_is_empty(author) and not _field_is_empty(title):
+        if (
+            author != current.author
+            or title != current.title
+            or (overrides.year is not None and overrides.year != current.year)
+        ):
+            metadata = BookMetadata(
+                author=author,
+                title=title,
+                series=current.series,
+                sequence=current.sequence,
+                year=overrides.year if overrides.year is not None else current.year,
+                narrator=current.narrator,
+                subtitle=current.subtitle,
+            )
+            return ResolvedMetadata(metadata=metadata, warnings=tuple(warnings))
+        return resolved
+
+    guess = guess_from_name(name)
+    updates: dict[str, object] = {}
+
+    if _field_is_empty(author):
+        if guess is not None:
+            updates["author"] = guess.author
+            warnings.append("Guessed author from folder name (confidence: low)")
+        else:
+            raise MetadataError(
+                f"Could not guess required metadata (author) from folder name {name!r}. "
+                "Set tags, use --author/--title, or use an Author - Title folder name."
+            )
+
+    if _field_is_empty(title):
+        if guess is not None:
+            updates["title"] = guess.title
+            warnings.append("Guessed title from folder name (confidence: low)")
+        else:
+            raise MetadataError(
+                f"Could not guess required metadata (title) from folder name {name!r}. "
+                "Set tags, use --author/--title, or use an Author - Title folder name."
+            )
+
+    if overrides.year is None and current.year is None and guess is not None:
+        if guess.year is not None:
+            updates["year"] = guess.year
+            warnings.append("Guessed year from folder name (confidence: low)")
+
+    metadata = replace(current, **updates)
+    if overrides.author is not None:
+        metadata = replace(metadata, author=overrides.author)
+    if overrides.title is not None:
+        metadata = replace(metadata, title=overrides.title)
+
+    if _field_is_empty(metadata.author) or _field_is_empty(metadata.title):
+        missing = []
+        if _field_is_empty(metadata.author):
+            missing.append("author")
+        if _field_is_empty(metadata.title):
+            missing.append("title")
+        raise MetadataError(
+            f"Could not guess required metadata ({', '.join(missing)}) from folder name {name!r}. "
+            "Set tags, use --author/--title, or use an Author - Title folder name."
+        )
+
+    return ResolvedMetadata(metadata=metadata, warnings=tuple(warnings))

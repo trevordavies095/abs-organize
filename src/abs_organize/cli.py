@@ -81,6 +81,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="preview destination and planned copies without modifying the library",
     )
     parser.add_argument(
+        "--allow-guess",
+        action="store_true",
+        help=(
+            "guess author and title from the book folder or file name when tags "
+            "are missing (low confidence; opt-in)"
+        ),
+    )
+    parser.add_argument(
         "--replace",
         action="store_true",
         help=(
@@ -155,6 +163,7 @@ def main(argv: list[str] | None = None) -> None:
             include_subtitle_in_folder=_load_include_subtitle_in_folder(),
             dry_run=args.dry_run,
             replace=args.replace,
+            allow_guess=args.allow_guess,
             on_log=on_log,
         )
     except ConfigError as exc:

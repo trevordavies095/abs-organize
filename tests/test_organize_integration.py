@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from abs_organize.metadata import MetadataError, ValidationError
+from abs_organize.metadata import MetadataError, MetadataOverrides, ValidationError
 from abs_organize.organize import organize, organize_file
 
 
@@ -100,6 +102,107 @@ def test_cli_missing_metadata_exits_1(make_tagged_mp3, tmp_path, capsys):
 
     assert exc.value.code == 1
     assert "Missing required metadata" in capsys.readouterr().err
+
+
+def _make_untagged_book_folder(tmp_path, make_tagged_mp3, folder_name: str) -> Path:
+    book = tmp_path / folder_name
+    book.mkdir()
+    path = make_tagged_mp3(name="01.mp3")
+    path.rename(book / "01.mp3")
+    return book
+
+
+def test_organize_untagged_folder_fails_without_allow_guess(
+    tmp_path, make_tagged_mp3
+):
+    source = _make_untagged_book_folder(
+        tmp_path, make_tagged_mp3, "Jane Author - Great Book"
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(MetadataError, match="Missing required metadata"):
+        organize(source, library)
+
+    assert not list(library.iterdir())
+
+
+def test_organize_untagged_folder_succeeds_with_allow_guess(
+    tmp_path, make_tagged_mp3
+):
+    source = _make_untagged_book_folder(
+        tmp_path, make_tagged_mp3, "Jane Author - Great Book"
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result, warnings = organize(source, library, allow_guess=True)
+
+    dest = library / "Jane Author" / "Great Book" / "01.mp3"
+    assert dest.is_file()
+    assert result.dest_dir == dest.parent
+    assert any("Guessed author" in warning for warning in warnings)
+    assert any("Guessed title" in warning for warning in warnings)
+
+
+def test_organize_allow_guess_dry_run_plans_without_writing(
+    tmp_path, make_tagged_mp3
+):
+    source = _make_untagged_book_folder(
+        tmp_path, make_tagged_mp3, "Jane Author - Great Book"
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result, warnings = organize(source, library, dry_run=True, allow_guess=True)
+
+    assert result.dest_dir == library / "Jane Author" / "Great Book"
+    assert result.copied_files == ("01.mp3",)
+    assert any("Guessed author" in warning for warning in warnings)
+    assert not list(library.iterdir())
+
+
+def test_cli_allow_guess_organizes_untagged_folder(
+    tmp_path, make_tagged_mp3, capsys
+):
+    from abs_organize.cli import main
+
+    source = _make_untagged_book_folder(
+        tmp_path, make_tagged_mp3, "Jane Author - Great Book"
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(source), "--library", str(library), "--allow-guess"])
+
+    assert exc.value.code == 0
+    err = capsys.readouterr().err
+    assert "Guessed author" in err
+    assert (library / "Jane Author" / "Great Book" / "01.mp3").is_file()
+
+
+def test_organize_allow_guess_title_override_beats_folder(
+    tmp_path, make_tagged_mp3
+):
+    source = _make_untagged_book_folder(
+        tmp_path, make_tagged_mp3, "Jane Author - Great Book"
+    )
+    library = tmp_path / "library"
+    library.mkdir()
+
+    result, warnings = organize(
+        source,
+        library,
+        allow_guess=True,
+        overrides=MetadataOverrides(title="Override Title"),
+    )
+
+    dest = library / "Jane Author" / "Override Title" / "01.mp3"
+    assert dest.is_file()
+    assert result.dest_dir == dest.parent
+    assert any("Guessed author" in warning for warning in warnings)
+    assert not any("Guessed title" in warning for warning in warnings)
 
 
 def test_organize_multi_disc_folder(tmp_path, make_tagged_mp3):

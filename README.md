@@ -17,7 +17,7 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
-abs-organize INPUT [--profile NAME] [--library PATH] [--dry-run] [--replace] [-v|--verbose]
+abs-organize INPUT [--profile NAME] [--library PATH] [--dry-run] [--replace] [--allow-guess] [-v|--verbose]
 ```
 
 - **INPUT** — path to a single audio file or a directory of tracks (`.mp3`, `.m4b`, `.m4a`, `.flac`, `.ogg`)
@@ -25,6 +25,7 @@ abs-organize INPUT [--profile NAME] [--library PATH] [--dry-run] [--replace] [-v
 - **--library** — library root for this run only (overrides config and env)
 - **--dry-run** — print library root, destination, and planned copies; make no changes
 - **--replace** — delete the entire existing destination title folder, then copy (destructive; use when re-organizing)
+- **--allow-guess** — when author/title tags are missing, guess them from the book folder or file name (low confidence; see below)
 - **-v / --verbose** — log path segment sanitization details to stderr
 
 When `[libraries.default]` is configured, you can omit `--library`:
@@ -49,6 +50,24 @@ abs-organize ~/Downloads/inbox/SomeBook --library ~/Audiobooks
 ```
 
 Metadata is read from embedded tags (Mutagen). Author comes from `albumartist` or `artist`; title from `album` or `title`. Optional tags drive ABS-style folders: `grouping` (series), `date` (year), `composer` (narrator), and on `.m4b`/`.m4a` iTunes movement atoms when present.
+
+By default, missing author or title tags cause the command to exit with an error and make no library changes. Use **`--allow-guess`** to opt in to folder-name heuristics when tags are too sparse.
+
+### Folder-name guessing (`--allow-guess`)
+
+When tags do not provide author and title, `--allow-guess` parses the book folder name (or the file stem for a single-file input). Guesses are marked on stderr with `(confidence: low)`. CLI overrides (`--author`, `--title`, etc.) always win over guesses.
+
+Supported patterns (first separator wins for titles that contain hyphens):
+
+- `Author - Title`
+- `Author – Title` / `Author — Title` (en dash or em dash)
+- `Author - Title (YYYY)` — optional trailing year in parentheses
+
+Example:
+
+```bash
+abs-organize ~/Downloads/inbox/"Jane Author - Great Book" --library ~/Audiobooks --allow-guess
+```
 
 **Example layout (series):**
 
