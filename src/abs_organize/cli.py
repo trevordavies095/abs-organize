@@ -12,6 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from abs_organize.config import ENV_LIBRARY, ConfigError, resolve_library_path
 from abs_organize.metadata import MetadataError, ValidationError
 from abs_organize.organize import OrganizeIOError, OrganizeResult, organize_file
 
@@ -32,10 +33,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--library",
-        required=True,
         type=Path,
         metavar="PATH",
-        help="library root directory for this run",
+        default=None,
+        help=(
+            f"library root directory for this run (overrides config and {ENV_LIBRARY})"
+        ),
+    )
+    parser.add_argument(
+        "--profile",
+        metavar="NAME",
+        default=None,
+        help="named library profile from config (default profile when omitted)",
     )
     return parser
 
@@ -53,7 +62,14 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     try:
-        result = organize_file(args.input, args.library)
+        library = resolve_library_path(
+            library_flag=args.library,
+            profile=args.profile,
+        )
+        result = organize_file(args.input, library)
+    except ConfigError as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(1) from exc
     except ValidationError as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from exc
