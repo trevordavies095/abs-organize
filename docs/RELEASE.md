@@ -78,3 +78,30 @@ twine check dist/*
 ```
 
 Expect `python -m build` to produce `dist/abs-organize-0.1.0.tar.gz` and `dist/abs_organize-0.1.0-py3-none-any.whl`. `twine check` should report both artifacts as valid with no errors.
+
+## TestPyPI release
+
+Automated by [`.github/workflows/release.yml`](../.github/workflows/release.yml) using trusted publishing to the **`testpypi`** GitHub environment.
+
+### Cutting a release
+
+1. Bump `version` in `pyproject.toml` and `src/abs_organize/__init__.py`.
+2. Commit the version bump on the branch you intend to release.
+3. Push a tag `v{version}` (first release: **`v0.1.0`**). The tag must match `pyproject.toml` (e.g. `v0.1.0` ↔ `0.1.0`).
+
+### Manual dry run
+
+Actions → **Release** → **Run workflow** (`workflow_dispatch`). Skips the tag/version guard; useful for a first upload before tagging.
+
+### Install verification
+
+Dependencies (`mutagen`, `Pillow`) are resolved from production PyPI, not TestPyPI:
+
+```bash
+pip install --index-url https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ \
+  abs-organize==0.1.0
+abs-organize --help
+```
+
+Replace `0.1.0` with the version you published.
