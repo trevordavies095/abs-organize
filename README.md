@@ -1,6 +1,23 @@
 # abs-organize
 
-A Python CLI that copies or moves a tagged audiobook file into an [Audiobookshelf](https://www.audiobookshelf.org/) library layout (`{library}/{Author}/[{Series}/]{TitleFolder}/`). Copy is the default.
+CLI to place downloaded audiobooks into an [Audiobookshelf](https://www.audiobookshelf.org/) library layout from embedded tags (and optional folder-name guesses). **Copy** is the default; use **`--move`** to clear the inbox after a successful run.
+
+**Layout:** `{library}/{Author}/[{Series}/]{TitleFolder}/`
+
+**Requirements:** Python 3.11+
+
+## Quick start
+
+```bash
+pip install -e ".[dev]"   # editable install + pytest
+
+# One-off (no config file)
+abs-organize ~/Downloads/book.m4b --library ~/Audiobooks --dry-run
+abs-organize ~/Downloads/book.m4b --library ~/Audiobooks
+
+# With config (see Configuration)
+abs-organize ~/Downloads/inbox/MyBook.m4b
+```
 
 ## Install
 
@@ -8,43 +25,39 @@ A Python CLI that copies or moves a tagged audiobook file into an [Audiobookshel
 pip install -e .
 ```
 
-For development and tests:
+Development and tests:
 
 ```bash
 pip install -e ".[dev]"
+pytest
 ```
+
+Run `abs-organize --help` for the full option list.
 
 ## Usage
 
-```bash
-abs-organize INPUT [--profile NAME] [--library PATH] [--dry-run] [--move] [--replace] [--allow-guess] [--json] [-v|--verbose]
+```text
+abs-organize INPUT [options]
 ```
 
-- **INPUT** — path to a single audio file or a directory of tracks (`.mp3`, `.m4b`, `.m4a`, `.flac`, `.ogg`)
-- **--profile** — named library profile from config (uses `default` when omitted)
-- **--library** — library root for this run only (overrides config and env)
-- **--dry-run** — print library root, destination, and planned operations; make no changes
-- **--move** — relocate files from the input path into the library (same layout as copy; sources removed after success)
-- **--replace** — delete the entire existing destination title folder, then organize (destructive; use when re-organizing)
-- **--allow-guess** — when author/title tags are missing, guess them from the book folder or file name (low confidence; see below)
-- **--json** — on success, print minimal JSON to stdout (for scripting); errors stay on stderr as plain text
-- **-v / --verbose** — log path segment sanitization details to stderr
+**INPUT** — one audio file (`.mp3`, `.m4b`, `.m4a`, `.flac`, `.ogg`) or a folder of tracks.
 
-When `[libraries.default]` is configured, you can omit `--library`:
+| Option | Purpose |
+|--------|---------|
+| `--library PATH` | Library root for this run (overrides config and env) |
+| `--profile NAME` | Named `[libraries.*]` profile (default profile when omitted) |
+| `--dry-run` | Show library, destination, and planned ops; no writes |
+| `--move` | Move into the library instead of copy (rename on same FS) |
+| `--replace` | Delete existing destination title folder, then organize |
+| `--allow-guess` | Guess author/title from folder or file name when tags are missing |
+| `--batch` | Organize every detected book under INPUT (multi-book inbox) |
+| `--continue-on-error` | With `--batch`, keep going after a failure (apply runs only) |
+| `--json` | Success payload on stdout (scripting) |
+| `-v`, `--verbose` | Path sanitization details on stderr |
 
-```bash
-abs-organize ~/Downloads/book.m4b
-```
+**Metadata overrides** (single-book runs): `--author`, `--title`, `--year`, `--series`, `--sequence`, `--narrator`. With **`--batch`**, `--series`, `--narrator`, and `--year` may gap-fill empty fields per book; `--author`, `--title`, and `--sequence` are rejected.
 
-Example with an explicit library path (no config required):
-
-```bash
-abs-organize ~/Downloads/book.m4b --library ~/Audiobooks
-```
-
-### Preview first
-
-Use `--dry-run` to verify naming before writing. It runs the same metadata validation as a real organize and prints warnings to stderr, but does not create directories or transfer files under the library. Omit the flag to apply (copy by default) into the library.
+### Preview, copy, and move
 
 ```bash
 abs-organize ~/Downloads/inbox/SomeBook --dry-run --library ~/Audiobooks
@@ -52,39 +65,44 @@ abs-organize ~/Downloads/inbox/SomeBook --library ~/Audiobooks
 abs-organize ~/Downloads/inbox/SomeBook --library ~/Audiobooks --move
 ```
 
-On the same filesystem, `--move` uses a rename when possible. Across devices, Python falls back to copy-then-delete on the source (same end state: files in the library, sources removed).
+`--dry-run` uses the same validation as a real run and prints warnings to stderr, but does not create library paths or transfer files.
 
-Metadata is read from embedded tags (Mutagen). Author comes from `albumartist` or `artist`; title from `album` or `title`. Optional tags drive ABS-style folders: `grouping` (series), `date` (year), `composer` (narrator), and on `.m4b`/`.m4a` iTunes movement atoms when present.
+### Batch inbox
 
-By default, missing author or title tags cause the command to exit with an error and make no library changes. Use **`--allow-guess`** to opt in to folder-name heuristics when tags are too sparse.
-
-### Folder-name guessing (`--allow-guess`)
-
-When tags do not provide author and title, `--allow-guess` parses the book folder name (or the file stem for a single-file input). Guesses are marked on stderr with `(confidence: low)`. CLI overrides (`--author`, `--title`, etc.) always win over guesses.
-
-Supported patterns (first separator wins for titles that contain hyphens):
-
-- `Author - Title`
-- `Author – Title` / `Author — Title` (en dash or em dash)
-- `Author - Title (YYYY)` — optional trailing year in parentheses
-
-Example:
+If INPUT contains multiple book roots (e.g. several `.m4b` siblings), a plain run fails with a candidate list. Use **`--batch`** to organize all detected books:
 
 ```bash
-abs-organize ~/Downloads/inbox/"Jane Author - Great Book" --library ~/Audiobooks --allow-guess
+abs-organize ~/Downloads/inbox --batch --library ~/Audiobooks --dry-run
+abs-organize ~/Downloads/inbox --batch --library ~/Audiobooks --move
 ```
 
-**Example layout (series):**
+Dry-run always reports every book. On apply, batch stops at the first failure unless **`--continue-on-error`** is set.
+
+**Discovery (summary):** each `.m4b`/`.m4a` sibling is its own book; `.mp3`/`.flac`/`.ogg` siblings in one folder are one book; `Disc`/`CD`/`Disk` subfolders roll up to one book at the parent.
+
+### Metadata and guessing
+
+Tags are read with [Mutagen](https://mutagen.readthedocs.io/):
+
+| Folder segment | Tags |
+|----------------|------|
+| Author | `albumartist` or `artist` |
+| Title folder | `album` or `title` (+ optional `subtitle` via config) |
+| Series | `grouping`; sequence/year/narrator from tags, movement atoms (`.m4b`/`.m4a`), or OPF when present |
+
+Missing **author** or **title** tags exit with an error unless **`--allow-guess`** is set. Guesses use patterns such as `Author - Title` or `Author - Title (YYYY)` on the book folder or file stem; stderr marks them `(confidence: low)`. CLI overrides always win.
+
+**Example (series layout):**
 
 ```text
 {library}/Terry Goodkind/Sword of Truth/Vol 1 - 1994 - Wizards First Rule {Sam Tsoutsouvas}/book.m4b
 ```
 
-By default the file is **copied**, keeping its original basename in the inbox. Use **`--move`** to remove sources after a successful organize.
+Sidecars (`desc.txt`, `reader.txt`, cover images) are copied when present.
 
 ## Configuration
 
-Config file: `~/.config/abs-organize/config.toml`
+File: `~/.config/abs-organize/config.toml`
 
 ```toml
 include_subtitle_in_folder = false
@@ -96,11 +114,10 @@ path = "/Users/you/Audiobooks"
 path = "/Users/you/Audiobooks/Fiction"
 ```
 
-- **`[libraries.default]`** is required.
-- Additional profiles (e.g. `[libraries.fiction]`) are optional.
-- `include_subtitle_in_folder` — when `true`, appends ` - {subtitle}` to the title folder name (from the `subtitle` tag).
+- **`[libraries.default]`** is required when you omit `--library`.
+- `include_subtitle_in_folder` — append ` - {subtitle}` to the title folder name.
 
-### Library path precedence
+**Library path precedence**
 
 | Priority | Source |
 |----------|--------|
@@ -109,7 +126,38 @@ path = "/Users/you/Audiobooks/Fiction"
 | 3 | `[libraries.{profile}].path` when `--profile NAME` is set |
 | 4 | `[libraries.default].path` |
 
-Set `ABS_ORGANIZE_LIBRARY` to override the default profile path without editing config.
+## Scripting (`--json`)
+
+On success, stdout is JSON; errors stay on stderr (plain text). Warnings are in the JSON payload, not duplicated on stderr.
+
+**Single book:**
+
+```json
+{
+  "destination": "/Users/you/Audiobooks/Jane Author/Book Title/",
+  "files": ["book.mp3"],
+  "warnings": []
+}
+```
+
+**Batch:**
+
+```json
+{
+  "books": [
+    {
+      "source": "/inbox/Book A/",
+      "ok": true,
+      "destination": "/Audiobooks/Author/Title/",
+      "files": ["book.m4b"],
+      "warnings": []
+    }
+  ],
+  "summary": { "ok": 1, "failed": 0 }
+}
+```
+
+Unknown top-level keys may be added later; ignore fields you do not need.
 
 ## Exit codes
 
@@ -119,30 +167,22 @@ Set `ABS_ORGANIZE_LIBRARY` to override the default profile path without editing 
 | 1 | User or metadata error (missing tags, invalid paths, config/profile errors) |
 | 2 | I/O error (copy, move, or filesystem failure) |
 
-## JSON output
+Batch: `0` only if every book succeeded; partial failure uses `1` or `2` if any book hit I/O errors.
 
-With `--json`, a successful run prints a single JSON object to stdout (human-readable lines are omitted). Warnings are included in the payload, not duplicated on stderr. Failed runs print an error message on stderr and exit `1` or `2` without success JSON.
+## Development
 
-```json
-{
-  "destination": "/Users/you/Audiobooks/Jane Author/Book Title/",
-  "files": ["book.mp3"],
-  "warnings": ["album tag conflict: ..."]
-}
-```
-
-- **destination** — absolute path to the title folder, with a trailing `/`
-- **files** — paths relative to the title folder (audio, sidecars, cover when present)
-- **warnings** — non-fatal notices (tag conflicts, collision hints on dry-run, etc.)
-
-Additional top-level keys may be added in later versions (`profile`, `dry_run`, …) without breaking consumers that ignore unknown fields.
-
-## Tests
+| Path | Role |
+|------|------|
+| `src/abs_organize/cli.py` | Argument parsing and entry point |
+| `src/abs_organize/organize.py` | Single-book copy/move pipeline |
+| `src/abs_organize/batch.py` | Multi-book inbox orchestration |
+| `src/abs_organize/discovery.py` | Book-root detection |
+| `src/abs_organize/metadata.py` | Tag read, validation, overrides |
+| `src/abs_organize/naming.py` | ABS-style path segments |
+| `tests/` | Pytest suite (`test_data/` for fixtures) |
 
 ```bash
+pip install -e ".[dev]"
 pytest
+abs-organize --help
 ```
-
-## Roadmap
-
-Batch inbox processing and additional features are tracked in the project issues.
