@@ -98,6 +98,47 @@ def test_discover_book_root_two_sibling_m4b(tmp_path, make_tagged_m4b):
     assert "--batch" in message
 
 
+def test_discover_book_roots_disc_numbered_m4b_is_one_book(
+    tmp_path, make_tagged_m4b
+):
+    root = tmp_path / "Fallen"
+    root.mkdir()
+    for disc in range(1, 4):
+        path = make_tagged_m4b(
+            name=f"Fallen - CD {disc:02d}.m4b",
+            artist="Karin Slaughter",
+            title="Fallen",
+        )
+        path.rename(root / path.name)
+
+    assert discover_book_roots(root) == [root.resolve()]
+    assert discover_book_root(root) == root.resolve()
+
+    audio = collect_book_audio(root)
+    assert [a.dest_relative.as_posix() for a in audio] == [
+        "Fallen - CD 01.m4b",
+        "Fallen - CD 02.m4b",
+        "Fallen - CD 03.m4b",
+    ]
+
+
+def test_discover_book_roots_disc_numbered_distinct_titles_stay_separate(
+    tmp_path, make_tagged_m4b
+):
+    root = tmp_path / "inbox"
+    root.mkdir()
+    a = make_tagged_m4b(name="Fallen - CD 01.m4b", artist="A", title="Fallen")
+    b = make_tagged_m4b(name="Broken - CD 01.m4b", artist="A", title="Broken")
+    a.rename(root / a.name)
+    b.rename(root / b.name)
+
+    roots = discover_book_roots(root)
+    assert roots == [
+        (root / "Broken - CD 01.m4b").resolve(),
+        (root / "Fallen - CD 01.m4b").resolve(),
+    ]
+
+
 def test_discover_book_root_two_book_subfolders(tmp_path, make_tagged_mp3):
     root = tmp_path / "inbox"
     root.mkdir()

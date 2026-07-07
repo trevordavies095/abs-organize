@@ -1,7 +1,10 @@
 """Discover audio tracks, book roots, and sidecars.
 
 Book-root heuristic (see issue #6):
-- **Container** files (``.m4b``, ``.m4a``): each direct sibling is its own book.
+- **Container** files (``.m4b``, ``.m4a``): each direct sibling is its own book,
+  *unless* the siblings form a single disc set (same base name plus a
+  ``CD`` / ``Disc`` / ``Disk`` number, e.g. ``Fallen - CD 01.m4b``), in which
+  case they are one multi-file book.
 - **Track-style** files (``.mp3``, ``.flac``, ``.ogg``): all direct siblings in one folder are one book.
 - **No direct audio**: recurse into child directories (max depth ``MAX_DISCOVERY_DEPTH``).
 - **Multiple disc subfolders** (``Disc`` / ``CD`` / ``Disk``): one book at the parent (issue #7).
@@ -21,6 +24,9 @@ MAX_DISCOVERY_DEPTH = 5
 _CONTAINER_EXTENSIONS = frozenset({".m4b", ".m4a"})
 
 _DISC_FOLDER_RE = re.compile(r"^(disc|cd|disk)\s*0*(\d+)$", re.IGNORECASE)
+
+# A disc marker inside a *file* stem: ``Book - CD 01``, ``Book Disc 2``, ``BookDisk03``.
+_DISC_FILE_RE = re.compile(r"(?:^|[\s._-])(?:disc|cd|disk)\s*0*\d+\s*$", re.IGNORECASE)
 
 _COPY_SIDECAR_NAMES = frozenset({"desc.txt", "reader.txt"})
 
@@ -72,6 +78,36 @@ def _is_disc_layout(audio_subdirs: list[Path]) -> bool:
     )
 
 
+def _disc_file_base(name: str) -> str | None:
+    """Return the shared title portion of a disc-numbered file name.
+
+    ``Fallen - CD 01.m4b`` -> ``fallen``. Returns ``None`` when the stem does
+    not end in a ``CD`` / ``Disc`` / ``Disk`` number.
+    """
+    stem = Path(name).stem
+    match = _DISC_FILE_RE.search(stem)
+    if match is None:
+        return None
+    return stem[: match.start()].strip(" .-_").lower()
+
+
+def _is_multi_disc_container_set(containers: list[Path]) -> bool:
+    """True when sibling container files are disc parts of one book.
+
+    Requires at least two files that all carry a disc number and share the
+    same base title, so unrelated standalone ``.m4b`` books stay separate.
+    """
+    if len(containers) < 2:
+        return False
+    bases: set[str] = set()
+    for container in containers:
+        base = _disc_file_base(container.name)
+        if base is None:
+            return False
+        bases.add(base)
+    return len(bases) == 1
+
+
 def _subdir_audio_roots(directory: Path, *, depth_remaining: int) -> list[Path]:
     if depth_remaining <= 0:
         return []
@@ -98,6 +134,8 @@ def _book_roots_at(directory: Path, *, depth_remaining: int) -> list[Path]:
         ]
 
         if len(containers) >= 2:
+            if not track_style and _is_multi_disc_container_set(containers):
+                return [directory]
             return containers
 
         if containers and track_style:
